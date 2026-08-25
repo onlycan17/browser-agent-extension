@@ -9,7 +9,6 @@ const anthropicSettings = {
   model: "claude-sonnet-4-5",
   apiKey: "anthropic-secret",
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 interface CapturedRequest {

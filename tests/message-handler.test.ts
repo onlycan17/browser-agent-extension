@@ -13,7 +13,6 @@ const runtimeSettings: ProviderSettings = {
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
   rememberApiKey: false,
-  maxAgentSteps: 8,
   apiKey: "secret",
 };
 const summary = { ...withoutApiKey(runtimeSettings), hasApiKey: true };
@@ -85,6 +84,24 @@ describe("background message handler", () => {
       ok: false,
       error: { code: "PROVIDER_TIMEOUT", message: "Provider timed out.", retryable: true },
     });
+  });
+
+  it("rejects a stale approval decision after run cleanup", async () => {
+    const provider = {
+      testConnection: () => Promise.resolve({ models: [], selectedModelAvailable: false }),
+    };
+    const handle = createMessageHandler(createSettingsService(), provider, analysis, {
+      ...agent,
+      decideApproval: () => false,
+    });
+
+    const result = await handle({
+      id: "approval-late",
+      type: "ACTION_APPROVAL_DECISION",
+      payload: { runId: "run-finished", approvalId: "approval-expired", approved: true },
+    });
+
+    expect(result).toEqual({ id: "approval-late", ok: true, data: { accepted: false } });
   });
 
   it("rejects unknown messages before invoking services", async () => {

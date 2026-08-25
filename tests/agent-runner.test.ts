@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "../src/shared/agent";
 import type { ToolCall } from "../src/shared/llm";
 import type { PageSnapshot } from "../src/shared/page";
-import { AgentRunner } from "../src/background/agent-runner";
+import {
+  AGENT_EMERGENCY_STEP_LIMIT,
+  AGENT_RUN_TIMEOUT_MS,
+  AgentRunner,
+} from "../src/background/agent-runner";
 import { ApprovalManager } from "../src/background/approval-manager";
 import { DEFAULT_LOCAL_MODEL, LOCAL_BASE_URL } from "../src/shared/settings";
 
@@ -11,7 +15,6 @@ const settings = {
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
   rememberApiKey: false,
-  maxAgentSteps: 4,
 };
 const snapshot: PageSnapshot = {
   generation: 1,
@@ -58,6 +61,26 @@ function successfulTool(failed = false) {
 }
 
 describe("AgentRunner", () => {
+  it("clears a run approval grant when the run finishes", async () => {
+    const approvals = new ApprovalManager();
+    const pending = approvals.request("run-approved", "approval-1", 1000);
+    approvals.decide("run-approved", "approval-1", true);
+    await pending;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      { complete: () => Promise.resolve({ role: "assistant", content: "Finished" }) },
+      successfulTool(),
+      approvals,
+      () => undefined,
+    );
+
+    await runner.run("run-approved", "Finish", false);
+
+    expect(approvals.isRunApproved("run-approved")).toBe(false);
+    expect(runner.decideApproval("run-approved", "approval-1", true)).toBe(false);
+  });
+
   it("honors cancellation received before run registration", async () => {
     let pinned = false;
     const runner = new AgentRunner(
@@ -194,9 +217,41 @@ describe("AgentRunner", () => {
     expect(executions).toBe(1);
   });
 
-  it("stops at the configured step limit", async () => {
+  it("continues beyond the legacy step cap until the model finishes", async () => {
+    let completion = 0;
     const runner = new AgentRunner(
-      { loadRuntime: () => Promise.resolve({ ...settings, maxAgentSteps: 2 }) },
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completion += 1;
+          if (completion === 14) {
+            return Promise.resolve({ role: "assistant" as const, content: "Long task finished" });
+          }
+          const call: ToolCall = {
+            id: `call-${String(completion)}`,
+            type: "function",
+            function: {
+              name: "scroll_page",
+              arguments: JSON.stringify({ direction: "down", amount: completion }),
+            },
+          };
+          return Promise.resolve({ role: "assistant" as const, content: null, tool_calls: [call] });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-long", "Finish a long task", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Long task finished", steps: 14 });
+  });
+
+  it("stops when the same action produces the same page three times", async () => {
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
       tabs(),
       {
         complete: () =>
@@ -207,8 +262,220 @@ describe("AgentRunner", () => {
       () => undefined,
     );
 
-    const result = await runner.run("run-3", "Keep scrolling", false);
+    const result = await runner.run("run-stalled", "Keep scrolling", false);
 
-    expect(result).toMatchObject({ status: "step_limit", steps: 2 });
+    expect(result).toMatchObject({ status: "safety_limit", steps: 3 });
+    expect(result.answer).toContain("did not change the page");
+  });
+
+  it("does not treat different text input as the same stalled action", async () => {
+    let completion = 0;
+    const textValues = ["one", "two", "six"];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          const text = textValues[completion];
+          completion += 1;
+          if (text === undefined) {
+            return Promise.resolve({ role: "assistant" as const, content: "Input finished" });
+          }
+          const call: ToolCall = {
+            id: `type-${String(completion)}`,
+            type: "function",
+            function: {
+              name: "type_text",
+              arguments: JSON.stringify({
+                generation: 1,
+                elementId: "query",
+                text,
+                replace: true,
+              }),
+            },
+          };
+          return Promise.resolve({ role: "assistant" as const, content: null, tool_calls: [call] });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-text", "Refine a query", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Input finished", steps: 4 });
+  });
+
+  it("detects a stall despite volatile page text, bounds, and playback time", async () => {
+    let observation = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        observeActivePage: () => {
+          observation += 1;
+          return Promise.resolve({
+            ...snapshot,
+            visibleText: `Clock ${String(observation)}`,
+            elements: [
+              {
+                id: "status",
+                tag: "div",
+                role: "status",
+                name: "Live status",
+                disabled: false,
+                bounds: { x: observation, y: 0, width: 100, height: 20 },
+              },
+            ],
+            youtube: {
+              title: "Live video",
+              currentTime: observation,
+              duration: 120,
+              paused: false,
+              playbackRate: 1,
+              volume: 1,
+              captionText: `Caption ${String(observation)}`,
+            },
+          });
+        },
+      },
+      {
+        complete: () =>
+          Promise.resolve({ role: "assistant", content: null, tool_calls: [scrollCall] }),
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-dynamic-stall", "Keep scrolling", false);
+
+    expect(result).toMatchObject({ status: "safety_limit", steps: 3 });
+  });
+
+  it("stops at the emergency step watchdog", async () => {
+    let completion = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completion += 1;
+          const call: ToolCall = {
+            id: `call-${String(completion)}`,
+            type: "function",
+            function: {
+              name: "scroll_page",
+              arguments: JSON.stringify({ direction: "down", amount: completion }),
+            },
+          };
+          return Promise.resolve({ role: "assistant" as const, content: null, tool_calls: [call] });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-watchdog", "Never finish", false);
+
+    expect(result).toMatchObject({ status: "safety_limit", steps: AGENT_EMERGENCY_STEP_LIMIT });
+    expect(completion).toBe(AGENT_EMERGENCY_STEP_LIMIT);
+  });
+
+  it("cancels an in-flight tool wait immediately", async () => {
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () =>
+          Promise.resolve({ role: "assistant", content: null, tool_calls: [scrollCall] }),
+      },
+      {
+        execute: () => {
+          markStarted?.();
+          return new Promise(() => undefined);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const running = runner.run("run-cancel-action", "Keep working", false);
+    await started;
+    runner.cancel("run-cancel-action");
+
+    await expect(running).resolves.toMatchObject({ status: "cancelled", steps: 1 });
+  });
+
+  it("aborts an in-flight model call at the elapsed-time watchdog", async () => {
+    vi.useFakeTimers();
+    try {
+      const approvals = new ApprovalManager();
+      const approval = approvals.request(
+        "run-hard-timeout",
+        "approval-1",
+        AGENT_RUN_TIMEOUT_MS * 2,
+      );
+      approvals.decide("run-hard-timeout", "approval-1", true);
+      await approval;
+      let markStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const runner = new AgentRunner(
+        { loadRuntime: () => Promise.resolve(settings) },
+        tabs(),
+        {
+          complete: () => {
+            markStarted?.();
+            return new Promise(() => undefined);
+          },
+        },
+        successfulTool(),
+        approvals,
+        () => undefined,
+      );
+
+      const running = runner.run("run-hard-timeout", "Never respond", false);
+      await started;
+      await vi.advanceTimersByTimeAsync(AGENT_RUN_TIMEOUT_MS);
+
+      await expect(running).resolves.toMatchObject({ status: "safety_limit", steps: 1 });
+      expect(approvals.isRunApproved("run-hard-timeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops at the elapsed-time watchdog", async () => {
+    let elapsed = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () =>
+          Promise.resolve({ role: "assistant", content: null, tool_calls: [scrollCall] }),
+      },
+      {
+        execute: (call) => {
+          elapsed = AGENT_RUN_TIMEOUT_MS;
+          return successfulTool().execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+      () => elapsed,
+    );
+
+    const result = await runner.run("run-timeout", "Keep working", false);
+
+    expect(result).toMatchObject({ status: "safety_limit", steps: 1 });
+    expect(result.answer).toContain("30-minute safety limit");
   });
 });

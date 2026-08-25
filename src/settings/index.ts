@@ -24,7 +24,6 @@ interface SettingsElements {
   apiKey: HTMLInputElement;
   providerKeyHelp: HTMLElement;
   rememberApiKey: HTMLInputElement;
-  maxAgentSteps: HTMLInputElement;
   keyStatus: HTMLElement;
   localWarning: HTMLElement;
   customWarning: HTMLElement;
@@ -61,7 +60,6 @@ function collectElements(): SettingsElements {
     apiKey: getElement("#api-key", HTMLInputElement),
     providerKeyHelp: getElement("#provider-key-help", HTMLElement),
     rememberApiKey: getElement("#remember-api-key", HTMLInputElement),
-    maxAgentSteps: getElement("#max-agent-steps", HTMLInputElement),
     keyStatus: getElement("#key-status", HTMLElement),
     localWarning: getElement("#local-warning", HTMLElement),
     customWarning: getElement("#custom-warning", HTMLElement),
@@ -97,7 +95,6 @@ function renderSummary(elements: SettingsElements, summary: SettingsSummary): vo
   elements.baseUrl.value = summary.baseUrl;
   elements.model.value = summary.model;
   elements.rememberApiKey.checked = summary.rememberApiKey;
-  elements.maxAgentSteps.value = String(summary.maxAgentSteps);
   elements.keyStatus.textContent = summary.hasApiKey
     ? "저장된 API 키가 있습니다. 새 값을 입력하면 교체됩니다."
     : "저장된 API 키가 없습니다.";
@@ -121,7 +118,6 @@ function rawSettings(elements: SettingsElements): ProviderSettings {
     baseUrl: elements.baseUrl.value,
     model: elements.model.value,
     rememberApiKey: elements.rememberApiKey.checked,
-    maxAgentSteps: Number(elements.maxAgentSteps.value),
   };
   const apiKey = elements.apiKey.value.trim();
   return apiKey.length === 0 ? base : { ...base, apiKey };

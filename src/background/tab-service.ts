@@ -112,12 +112,19 @@ export class TabService {
     return snapshot;
   }
 
-  async executeAction(action: PageActionRequest, runId?: string): Promise<PageActionResult> {
+  async executeAction(
+    action: PageActionRequest,
+    runId?: string,
+    signal?: AbortSignal,
+  ): Promise<PageActionResult> {
+    signal?.throwIfAborted();
     const tab = await this.tabForRun(runId);
     await this.ensureContentScript(tab.id);
+    signal?.throwIfAborted();
     if (runId !== undefined && mayNavigate(action)) this.navigationAllowances.add(runId);
     const id = crypto.randomUUID();
     const response = await this.adapter.send(tab.id, { id, ...action });
+    signal?.throwIfAborted();
     const result = parseActionResponse(response, id);
     if (result === null) {
       throw new PageAccessError(

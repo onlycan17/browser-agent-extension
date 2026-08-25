@@ -1,6 +1,6 @@
 export interface AgentRunResult {
   runId: string;
-  status: "completed" | "cancelled" | "step_limit";
+  status: "completed" | "cancelled" | "safety_limit";
   answer: string;
   steps: number;
 }

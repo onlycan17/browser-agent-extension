@@ -118,23 +118,15 @@
             <div class="section-title">
               <span>03</span>
               <div>
-                <h2 id="agent-heading">에이전트 한도</h2>
-                <p>한 작업에서 연속 실행할 수 있는 최대 단계입니다.</p>
+                <h2 id="agent-heading">에이전트 실행</h2>
+                <p>요청을 완료할 때까지 계속 진행하며 언제든 직접 중지할 수 있습니다.</p>
               </div>
             </div>
 
-            <label class="field field--compact">
-              <span>Max agent steps</span>
-              <input
-                id="max-agent-steps"
-                name="maxAgentSteps"
-                type="number"
-                min="1"
-                max="12"
-                required
-              />
-              <small>권장값 8 · 허용 범위 1–12</small>
-            </label>
+            <div class="notice">
+              <strong>완료 중심 실행</strong>
+              <p>반복 동작으로 진행이 없거나 비상 안전 한도에 도달한 경우에만 자동 중지합니다.</p>
+            </div>
           </section>
 
           <div class="form-actions">
