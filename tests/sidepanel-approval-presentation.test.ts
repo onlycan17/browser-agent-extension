@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { approvalPresentation } from "../src/sidepanel/approval-presentation";
+import { APPROVE_RUN_LABEL, approvalPresentation } from "../src/sidepanel/approval-presentation";
 
 describe("Side Panel approval presentation", () => {
+  it("labels approval as applying to the full request", () => {
+    expect(APPROVE_RUN_LABEL).toBe("이 요청 모두 승인");
+  });
+
   it("continues thinking only after an accepted approval", () => {
     expect(approvalPresentation(true, true)).toEqual({
       title: "승인했어요",
-      body: "승인한 동작을 실행하고 결과를 확인합니다.",
+      body: "이 요청의 나머지 승인 대상 동작도 추가 확인 없이 실행합니다.",
       state: "thinking",
     });
   });

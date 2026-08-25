@@ -6,7 +6,7 @@ import {
 } from "../shared/provider-connection";
 import { RuntimeRequestError, sendRuntimeRequest } from "../shared/runtime-client";
 import type { SettingsSummary } from "../shared/settings";
-import { approvalPresentation } from "./approval-presentation";
+import { APPROVE_RUN_LABEL, approvalPresentation } from "./approval-presentation";
 import {
   appendChatMessage,
   setConversationStatus,
@@ -195,10 +195,12 @@ function setRunning(elements: PanelElements, running: boolean): void {
   elements.prompt.readOnly = running;
 }
 
-function resultPresentation(status: "cancelled" | "completed" | "step_limit"): [string, ChatState] {
+function resultPresentation(
+  status: "cancelled" | "completed" | "safety_limit",
+): [string, ChatState] {
   if (status === "completed") return ["작업을 완료했어요", "complete"];
   if (status === "cancelled") return ["작업을 중지했어요", "cancelled"];
-  return ["단계 제한에 도달했어요", "cancelled"];
+  return ["안전 한도에서 중지했어요", "cancelled"];
 }
 
 async function runAgent(elements: PanelElements): Promise<void> {
@@ -305,7 +307,7 @@ function showApproval(elements: PanelElements, event: AgentApprovalEvent): void 
   const detail = document.createElement("p");
   const actions = document.createElement("div");
   const deny = approvalButton("거부", "button button--secondary");
-  const approve = approvalButton("한 번 승인", "button button--primary");
+  const approve = approvalButton(APPROVE_RUN_LABEL, "button button--primary");
   title.textContent = event.payload.title;
   detail.textContent = event.payload.detail;
   actions.className = "approval-actions";
