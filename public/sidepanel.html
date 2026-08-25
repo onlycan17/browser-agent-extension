@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Agent</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="agent-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">BA</span>
+          <div>
+            <p class="eyebrow">LOCAL FLIGHT DECK</p>
+            <p class="brand-name">Browser Agent</p>
+          </div>
+        </div>
+        <button id="settings-button" class="icon-button" type="button" aria-label="설정 열기">
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </header>
+
+      <section class="connection-strip" aria-label="모델 연결 정보">
+        <span id="connection-dot" class="status-dot" data-state="idle" aria-hidden="true"></span>
+        <div class="connection-copy">
+          <span id="provider-label">LOCAL</span>
+          <strong id="model-label">설정 확인 중</strong>
+        </div>
+        <button id="connection-button" class="text-button" type="button">연결 확인</button>
+      </section>
+
+      <section class="conversation-section" aria-labelledby="conversation-title">
+        <div class="conversation-heading">
+          <div>
+            <p class="section-index">01 / CONVERSATION</p>
+            <h1 id="conversation-title">에이전트와 대화</h1>
+          </div>
+          <span id="conversation-status" class="conversation-status" data-state="idle">안내</span>
+        </div>
+        <ol
+          id="conversation-log"
+          class="conversation-log"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          <li class="chat-message chat-message--assistant" data-state="idle">
+            <article class="chat-message__bubble">
+              <header class="chat-message__meta">
+                <span class="chat-message__speaker">Browser Agent</span>
+                <span class="chat-message__status">준비</span>
+              </header>
+              <h3 class="chat-message__title">무엇을 도와드릴까요?</h3>
+              <div class="chat-message__body">
+                <p>현재 페이지를 요약하거나, 안전하게 실행할 작업을 입력해 주세요.</p>
+              </div>
+            </article>
+          </li>
+        </ol>
+      </section>
+
+      <section id="approval-region" class="approval-region" aria-live="assertive" hidden></section>
+
+      <form id="prompt-form" class="command-dock">
+        <label for="prompt-input" class="command-label">메시지</label>
+        <textarea
+          id="prompt-input"
+          name="prompt"
+          rows="3"
+          maxlength="4000"
+          placeholder="현재 페이지에서 무엇을 할까요?"
+          required
+        ></textarea>
+        <div class="command-options">
+          <label class="toggle-row" for="include-screenshot">
+            <input id="include-screenshot" type="checkbox" />
+            <span class="toggle" aria-hidden="true"></span>
+            화면 캡처 포함
+          </label>
+          <span class="privacy-note">요청 시에만 캡처</span>
+        </div>
+        <div class="command-actions">
+          <button id="analyze-button" class="button button--secondary" type="button">
+            화면 분석
+          </button>
+          <button id="run-button" class="button button--primary" type="submit">
+            메시지 보내기
+          </button>
+          <button id="stop-button" class="button button--danger" type="button" disabled>
+            중지
+          </button>
+        </div>
+      </form>
+
+      <p id="live-status" class="sr-only" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
