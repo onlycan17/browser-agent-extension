@@ -66,11 +66,18 @@ Current Web Page
 1. 모델 응답의 `tool_calls[].function.arguments`를 JSON으로 파싱한다.
 2. 도구별 validator가 정확한 스키마를 검사한다.
 3. SafetyPolicy가 차단, 승인 필요, 즉시 허용 중 하나를 반환한다.
-4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 승인 요청을 보낸다.
+4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다.
 5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭·창 전환과 예상하지 않은 navigation은 실행을 중단한다. 사용자 승인 후 실행한 클릭 또는 Enter는 다음 관찰까지 same-origin navigation 1회를 허용하고 pin URL을 갱신한다.
 6. 클릭 또는 Enter를 실행하면 같은 모델 응답의 남은 tool call은 deferred 결과로 닫고 새 snapshot을 관찰한 뒤 다음 모델 단계에서 다시 판단한다. action 응답이 unload로 유실돼도 allowance는 이 관찰까지만 유지된다.
 7. 허용된 명령만 Content Script 또는 Chrome API로 전달한다.
 8. 실행 결과를 `role: tool` 메시지로 모델에 반환한다.
+
+### 실행 종료
+
+1. 모델이 tool call 없는 최종 텍스트를 반환하면 정상 완료한다.
+2. URL, viewport, 숫자형 시각 정보가 정규화된 visible text, 안정 element 속성, 안정 YouTube 상태와 tool call 묶음이 3회 반복되면 정체로 판단한다. 입력 text는 원문 대신 fingerprint로 비교한다.
+3. 정체하거나 100단계 또는 30분 비상 한도에 도달하면 `safety_limit`으로 종료한다. 30분 deadline은 초기 관찰부터 모델·승인·도구 대기까지 전체 run의 `AbortController`에 적용한다.
+4. 사용자의 중지 요청은 단계와 무관하게 동일한 `AbortController`로 진행 중 대기를 즉시 취소한다.
 
 ## 4. 빌드 구조
 
