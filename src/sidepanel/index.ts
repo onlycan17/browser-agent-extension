@@ -7,8 +7,10 @@ import {
   appendChatMessage,
   setConversationStatus,
   updateChatMessage,
+  type ChatMessageActions,
   type ChatState,
 } from "./chat-renderer";
+import { copyResponse, shareResponse } from "./response-actions";
 import { PanelRunState } from "./run-state";
 
 interface PanelElements {
@@ -83,6 +85,16 @@ function setLiveStatus(elements: PanelElements, message: string): void {
   elements.liveStatus.textContent = message;
 }
 
+function responseActionHandlers(elements: PanelElements): ChatMessageActions {
+  return {
+    announce: (message) => {
+      setLiveStatus(elements, message);
+    },
+    copy: (message) => copyResponse(message.body),
+    share: (message) => shareResponse(message.title ?? "", message.body),
+  };
+}
+
 function addSystemMessage(
   elements: PanelElements,
   title: string,
@@ -99,12 +111,16 @@ function startConversationTurn(
   body: string,
 ): HTMLLIElement {
   appendChatMessage(elements.conversationLog, { role: "user", body: prompt, state: "idle" });
-  const response = appendChatMessage(elements.conversationLog, {
-    role: "assistant",
-    title,
-    body,
-    state: "thinking",
-  });
+  const response = appendChatMessage(
+    elements.conversationLog,
+    {
+      role: "assistant",
+      title,
+      body,
+      state: "thinking",
+    },
+    responseActionHandlers(elements),
+  );
   setConversationState(elements, "thinking");
   elements.prompt.value = "";
   return response;

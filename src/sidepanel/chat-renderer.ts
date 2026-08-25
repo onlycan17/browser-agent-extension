@@ -1,3 +1,5 @@
+import type { ResponseActionResult } from "./response-actions";
+
 export type ChatRole = "assistant" | "system" | "user";
 export type ChatState = "cancelled" | "complete" | "error" | "idle" | "thinking" | "waiting";
 
@@ -8,6 +10,15 @@ export interface ChatMessage {
   title?: string;
 }
 
+export interface ChatMessageActions {
+  announce(message: string): void;
+  copy(message: ChatMessage): Promise<ResponseActionResult>;
+  share(message: ChatMessage): Promise<ResponseActionResult>;
+}
+
+type ChatAction = "copy" | "share";
+
+const CURRENT_MESSAGES = new WeakMap<HTMLLIElement, ChatMessage>();
 const STATE_LABELS: Readonly<Record<ChatState, string>> = {
   cancelled: "중지됨",
   complete: "응답 완료",
@@ -91,6 +102,83 @@ function speakerLabel(role: ChatRole): string {
   return "Browser Agent";
 }
 
+function actionResult(
+  action: ChatAction,
+  result: ResponseActionResult,
+): { announcement: string; label: string; state: string } {
+  if (result === "cancelled")
+    return { announcement: "공유를 취소했습니다.", label: "공유", state: "idle" };
+  if (result === "shared")
+    return { announcement: "답변을 공유했습니다.", label: "공유됨", state: "success" };
+  const announcement =
+    action === "share" ? "공유 기능을 지원하지 않아 답변을 복사했습니다." : "답변을 복사했습니다.";
+  return { announcement, label: "복사됨", state: "success" };
+}
+
+function actionLabel(action: ChatAction): string {
+  return action === "copy" ? "복사" : "공유";
+}
+
+function syncMessageActions(entry: HTMLLIElement, message: ChatMessage): void {
+  CURRENT_MESSAGES.set(entry, message);
+  const actions = entry.querySelector<HTMLElement>(".chat-message__actions");
+  if (!actions) return;
+  actions.hidden = !(
+    message.role === "assistant" &&
+    (message.state === "complete" || message.state === "cancelled") &&
+    message.body.trim().length > 0
+  );
+  for (const button of actions.querySelectorAll<HTMLButtonElement>("button")) {
+    const action = button.dataset.action === "share" ? "share" : "copy";
+    button.textContent = actionLabel(action);
+    delete button.dataset.state;
+  }
+}
+
+async function runMessageAction(
+  entry: HTMLLIElement,
+  button: HTMLButtonElement,
+  action: ChatAction,
+  actions: ChatMessageActions,
+): Promise<void> {
+  const message = CURRENT_MESSAGES.get(entry);
+  if (!message) return;
+  button.disabled = true;
+  try {
+    const result = await actions[action](message);
+    const presentation = actionResult(action, result);
+    button.textContent = presentation.label;
+    button.dataset.state = presentation.state;
+    actions.announce(presentation.announcement);
+  } catch (error: unknown) {
+    button.textContent = "다시 시도";
+    button.dataset.state = "error";
+    actions.announce(error instanceof Error ? error.message : "답변 작업을 완료하지 못했습니다.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function appendMessageActions(
+  article: HTMLElement,
+  entry: HTMLLIElement,
+  actions: ChatMessageActions,
+): void {
+  const toolbar = document.createElement("div");
+  toolbar.className = "chat-message__actions";
+  toolbar.setAttribute("aria-label", "답변 작업");
+  toolbar.setAttribute("role", "group");
+  for (const action of ["copy", "share"] as const) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.action = action;
+    button.textContent = actionLabel(action);
+    button.addEventListener("click", () => void runMessageAction(entry, button, action, actions));
+    toolbar.append(button);
+  }
+  article.append(toolbar);
+}
+
 export function setConversationStatus(element: HTMLElement, state: ChatState): void {
   element.dataset.state = state;
   element.textContent = STATE_LABELS[state];
@@ -110,6 +198,7 @@ export function updateChatMessage(entry: HTMLLIElement, message: ChatMessage): v
   const container = entry.parentElement;
   const shouldScroll = container ? isNearBottom(container) : false;
   entry.dataset.state = message.state ?? "idle";
+  syncMessageActions(entry, message);
   const title = entry.querySelector<HTMLElement>(".chat-message__title");
   const body = entry.querySelector<HTMLElement>(".chat-message__body");
   const status = entry.querySelector<HTMLElement>(".chat-message__status");
@@ -122,6 +211,7 @@ export function updateChatMessage(entry: HTMLLIElement, message: ChatMessage): v
 export function appendChatMessage(
   container: HTMLOListElement,
   message: ChatMessage,
+  actions?: ChatMessageActions,
 ): HTMLLIElement {
   const shouldScroll = isNearBottom(container);
   const entry = document.createElement("li");
@@ -141,6 +231,7 @@ export function appendChatMessage(
   speaker.textContent = speakerLabel(message.role);
   header.append(speaker, status);
   article.append(header, title, body);
+  if (message.role === "assistant" && actions) appendMessageActions(article, entry, actions);
   entry.append(article);
   container.append(entry);
   updateChatMessage(entry, message);
