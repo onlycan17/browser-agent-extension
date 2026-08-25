@@ -13,7 +13,6 @@ const localSettings = {
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 interface CapturedRequest {

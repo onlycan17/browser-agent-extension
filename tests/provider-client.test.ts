@@ -18,7 +18,6 @@ const anthropicSettings = {
   baseUrl: ANTHROPIC_BASE_URL,
   model: "claude-sonnet-4-5",
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 const openRouterSettings = {
@@ -26,7 +25,6 @@ const openRouterSettings = {
   baseUrl: OPENROUTER_BASE_URL,
   model: "anthropic/claude-sonnet-4.5",
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 describe("ProviderClientRouter", () => {
