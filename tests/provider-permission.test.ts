@@ -20,7 +20,6 @@ const customSettings = {
   baseUrl: "https://llm.example.com/openai/v1",
   model: "example-model",
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 const openAiSummary = {
@@ -28,7 +27,6 @@ const openAiSummary = {
   baseUrl: OPENAI_BASE_URL,
   model: "gpt-4.1-mini",
   rememberApiKey: false,
-  maxAgentSteps: 8,
   hasApiKey: false,
 };
 
