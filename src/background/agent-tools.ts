@@ -109,7 +109,11 @@ export interface ToolExecutionResult {
 }
 
 interface ActionService {
-  executeAction(action: PageActionRequest, runId: string): Promise<{ message: string }>;
+  executeAction(
+    action: PageActionRequest,
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<{ message: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -235,6 +239,22 @@ export function toolCallSignature(call: ToolCall): string {
   return tool === null ? `invalid:${call.function.name}` : signature(tool);
 }
 
+function textFingerprint(value: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16_777_619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+export function toolCallProgressSignature(call: ToolCall): string {
+  const tool = parseTool(call);
+  if (tool === null)
+    return `invalid:${call.function.name}:${textFingerprint(call.function.arguments)}`;
+  if (tool.name !== "type_text") return signature(tool);
+  return `${signature(tool)}:${textFingerprint(tool.text)}`;
+}
+
 export function toolCallMayNavigate(call: ToolCall): boolean {
   const tool = parseTool(call);
   return tool?.name === "click_element" || (tool?.name === "press_key" && tool.key === "Enter");
@@ -284,7 +304,8 @@ export class AgentToolExecutor {
     }
     signal.throwIfAborted();
     try {
-      const result = await this.actions.executeAction(pageAction(tool), runId);
+      const result = await this.actions.executeAction(pageAction(tool), runId, signal);
+      signal.throwIfAborted();
       return {
         message: toolMessage(call.id, { ok: true, message: result.message }),
         failed: false,
@@ -303,19 +324,21 @@ export class AgentToolExecutor {
     signal: AbortSignal,
   ): Promise<boolean> {
     signal.throwIfAborted();
+    if (this.approvals.isRunApproved(runId)) return true;
     const approvalId = crypto.randomUUID();
     const element = "element" in proposal ? proposal.element : null;
     const copy = approvalCopy(tool, element);
+    const decisionPromise = this.approvals.request(runId, approvalId);
     this.emit({
       type: "AGENT_APPROVAL_REQUIRED",
       payload: {
         runId,
         approvalId,
         title: copy.title,
-        detail: `${copy.detail} · ${decision.reason}`,
+        detail: `${copy.detail} · ${decision.reason} · 승인하면 이 요청의 후속 승인 대상 동작도 함께 허용됩니다.`,
       },
     });
-    return this.approvals.request(runId, approvalId);
+    return decisionPromise;
   }
 
   private failure(callId: string, message: string, toolSignature: string): ToolExecutionResult {
