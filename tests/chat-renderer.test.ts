@@ -1,9 +1,17 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendChatMessage,
   setConversationStatus,
   updateChatMessage,
+  type ChatMessageActions,
 } from "../src/sidepanel/chat-renderer";
+
+function messageActions() {
+  const announce = vi.fn<(message: string) => void>();
+  const copy = vi.fn<ChatMessageActions["copy"]>().mockResolvedValue("copied");
+  const share = vi.fn<ChatMessageActions["share"]>().mockResolvedValue("shared");
+  return { actions: { announce, copy, share }, announce, copy, share };
+}
 
 function conversation(): HTMLOListElement {
   const element = document.createElement("ol");
@@ -136,6 +144,80 @@ describe("Side Panel chat renderer", () => {
     updateChatMessage(entry, { role: "assistant", body: "긴 최종 답변", state: "complete" });
 
     expect(log.scrollTop).toBe(100);
+  });
+
+  it("shows response actions only after an assistant response becomes final", () => {
+    const log = conversation();
+    const { actions } = messageActions();
+    const entry = appendChatMessage(
+      log,
+      { role: "assistant", body: "분석 중", state: "thinking" },
+      actions,
+    );
+    const toolbar = entry.querySelector<HTMLElement>(".chat-message__actions");
+
+    expect(toolbar?.hidden).toBe(true);
+    updateChatMessage(entry, { role: "assistant", body: "부분 답변", state: "cancelled" });
+    expect(toolbar?.hidden).toBe(false);
+    expect(toolbar?.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("does not add response actions to user or system messages", () => {
+    const log = conversation();
+    const { actions } = messageActions();
+
+    const user = appendChatMessage(log, { role: "user", body: "질문" }, actions);
+    const system = appendChatMessage(log, { role: "system", body: "안내" }, actions);
+
+    expect(user.querySelector(".chat-message__actions")).toBeNull();
+    expect(system.querySelector(".chat-message__actions")).toBeNull();
+  });
+
+  it("copies the latest response after progress updates", async () => {
+    const log = conversation();
+    const { actions, announce, copy } = messageActions();
+    const entry = appendChatMessage(
+      log,
+      { role: "assistant", body: "진행 내용", state: "thinking" },
+      actions,
+    );
+    updateChatMessage(entry, {
+      role: "assistant",
+      title: "최종 분석",
+      body: "최종 답변",
+      state: "complete",
+    });
+
+    entry.querySelector<HTMLButtonElement>('[data-action="copy"]')?.click();
+
+    await vi.waitFor(() => {
+      expect(copy).toHaveBeenCalled();
+    });
+    expect(copy.mock.calls[0]?.[0]).toMatchObject({ title: "최종 분석", body: "최종 답변" });
+    expect(entry.querySelector('[data-action="copy"]')?.textContent).toBe("복사됨");
+    expect(announce).toHaveBeenCalledWith("답변을 복사했습니다.");
+  });
+
+  it("announces native share cancellation and actionable failures", async () => {
+    const log = conversation();
+    const { actions, announce, copy, share } = messageActions();
+    share.mockResolvedValue("cancelled");
+    copy.mockRejectedValue(new Error("클립보드 권한을 확인해 주세요."));
+    const entry = appendChatMessage(
+      log,
+      { role: "assistant", body: "최종 답변", state: "complete" },
+      actions,
+    );
+
+    entry.querySelector<HTMLButtonElement>('[data-action="share"]')?.click();
+    await vi.waitFor(() => {
+      expect(announce).toHaveBeenCalledWith("공유를 취소했습니다.");
+    });
+    entry.querySelector<HTMLButtonElement>('[data-action="copy"]')?.click();
+    await vi.waitFor(() => {
+      expect(announce).toHaveBeenCalledWith("클립보드 권한을 확인해 주세요.");
+    });
+    expect(entry.querySelector('[data-action="copy"]')?.textContent).toBe("다시 시도");
   });
 
   it("announces approval waiting in the conversation header", () => {
