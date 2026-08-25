@@ -1,5 +1,9 @@
 import { parseAgentEvent, type AgentApprovalEvent, type AgentEvent } from "../shared/agent";
-import { LocalNetworkAccessError, testProviderConnection } from "../shared/provider-connection";
+import {
+  LocalNetworkAccessError,
+  runProviderRequest,
+  testProviderConnection,
+} from "../shared/provider-connection";
 import { RuntimeRequestError, sendRuntimeRequest } from "../shared/runtime-client";
 import type { SettingsSummary } from "../shared/settings";
 import { approvalPresentation } from "./approval-presentation";
@@ -163,10 +167,13 @@ async function analyzePage(elements: PanelElements): Promise<void> {
     "페이지 구조를 읽고 요청 내용을 분석합니다.",
   );
   try {
-    const result = await sendRuntimeRequest("PAGE_ANALYZE_REQUEST", {
-      prompt,
-      includeScreenshot: elements.includeScreenshot.checked,
-    });
+    const settings = await sendRuntimeRequest("SETTINGS_GET", {});
+    const result = await runProviderRequest(settings, () =>
+      sendRuntimeRequest("PAGE_ANALYZE_REQUEST", {
+        prompt,
+        includeScreenshot: elements.includeScreenshot.checked,
+      }),
+    );
     finishConversationTurn(elements, response, result.title, result.answer, "complete");
   } catch (error: unknown) {
     finishConversationTurn(
