@@ -235,6 +235,11 @@ export function toolCallSignature(call: ToolCall): string {
   return tool === null ? `invalid:${call.function.name}` : signature(tool);
 }
 
+export function toolCallMayNavigate(call: ToolCall): boolean {
+  const tool = parseTool(call);
+  return tool?.name === "click_element" || (tool?.name === "press_key" && tool.key === "Enter");
+}
+
 function toolMessage(callId: string, value: Record<string, unknown>): ToolMessage {
   return { role: "tool", tool_call_id: callId, content: JSON.stringify(value) };
 }

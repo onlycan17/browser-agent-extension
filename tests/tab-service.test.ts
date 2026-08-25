@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PageActionRequest } from "../src/shared/actions";
 import {
   createChromeTabAdapter,
   PageAccessError,
@@ -6,10 +7,10 @@ import {
   type BrowserTabAdapter,
 } from "../src/background/tab-service";
 
-function pageSnapshot() {
+function pageSnapshot(url = "https://example.com/") {
   return {
     generation: 1,
-    url: "https://example.com/",
+    url,
     title: "Example",
     viewport: { width: 1000, height: 800, scrollX: 0, scrollY: 0 },
     visibleText: "Example page",
@@ -133,6 +134,196 @@ describe("TabService", () => {
     const service = new TabService(adapter);
     await service.pinActivePage("run-1");
     activeUrl = "https://example.com/next";
+
+    await expect(service.observeActivePage("run-1")).rejects.toMatchObject({
+      code: "TAB_CHANGED",
+    });
+  });
+
+  it.each([
+    {
+      label: "approved click",
+      action: {
+        type: "PAGE_CLICK",
+        payload: { generation: 1, elementId: "e-1" },
+      },
+    },
+    {
+      label: "approved Enter",
+      action: { type: "PAGE_PRESS_KEY", payload: { key: "Enter" } },
+    },
+  ] satisfies { label: string; action: PageActionRequest }[])(
+    "continues after $label causes same-origin navigation",
+    async ({ action }) => {
+      let activeUrl = "https://example.com/start";
+      const adapter = createAdapter({
+        queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: activeUrl }]),
+        send: (_tabId, message) => {
+          if (typeof message !== "object" || message === null || !("id" in message)) {
+            return Promise.resolve(null);
+          }
+          if ("type" in message && message.type === "CONTENT_PING") {
+            return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+          }
+          if ("type" in message && message.type === "PAGE_OBSERVE") {
+            return Promise.resolve({ id: message.id, ok: true, data: pageSnapshot(activeUrl) });
+          }
+          activeUrl = "https://example.com/results";
+          return Promise.resolve({ id: message.id, ok: true, data: { message: "Navigated." } });
+        },
+      });
+      const service = new TabService(adapter);
+      await service.pinActivePage("run-1");
+
+      await service.executeAction(action, "run-1");
+
+      await expect(service.observeActivePage("run-1")).resolves.toMatchObject({
+        url: "https://example.com/results",
+      });
+    },
+  );
+
+  it("recovers navigation when the action response is lost during unload", async () => {
+    let activeUrl = "https://example.com/start";
+    const adapter = createAdapter({
+      queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: activeUrl }]),
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        if ("type" in message && message.type === "PAGE_OBSERVE") {
+          return Promise.resolve({ id: message.id, ok: true, data: pageSnapshot(activeUrl) });
+        }
+        activeUrl = "https://example.com/results";
+        return Promise.reject(new Error("The source document unloaded."));
+      },
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+
+    await expect(
+      service.executeAction(
+        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        "run-1",
+      ),
+    ).rejects.toThrow("The source document unloaded.");
+
+    await expect(service.observeActivePage("run-1")).resolves.toMatchObject({
+      url: "https://example.com/results",
+    });
+  });
+
+  it("allows navigation that starts after the action response", async () => {
+    let activeUrl = "https://example.com/start";
+    const adapter = createAdapter({
+      queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: activeUrl }]),
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        if ("type" in message && message.type === "PAGE_OBSERVE") {
+          return Promise.resolve({ id: message.id, ok: true, data: pageSnapshot(activeUrl) });
+        }
+        return Promise.resolve({ id: message.id, ok: true, data: { message: "Clicked." } });
+      },
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+    await service.executeAction(
+      { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+      "run-1",
+    );
+    activeUrl = "https://example.com/results";
+
+    await expect(service.observeActivePage("run-1")).resolves.toMatchObject({
+      url: "https://example.com/results",
+    });
+  });
+
+  it("rejects a tab switch after a click", async () => {
+    let activeTabId = 4;
+    const adapter = createAdapter({
+      queryActive: () =>
+        Promise.resolve([{ id: activeTabId, windowId: 2, url: "https://example.com/" }]),
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        activeTabId = 5;
+        return Promise.resolve({ id: message.id, ok: true, data: { message: "Clicked." } });
+      },
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+
+    await expect(
+      service.executeAction(
+        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        "run-1",
+      ),
+    ).rejects.toMatchObject({ code: "TAB_CHANGED" });
+  });
+
+  it("rejects cross-origin navigation after a click", async () => {
+    let activeUrl = "https://example.com/start";
+    const adapter = createAdapter({
+      queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: activeUrl }]),
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        activeUrl = "https://other.example/results";
+        return Promise.resolve({ id: message.id, ok: true, data: { message: "Navigated." } });
+      },
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+
+    await expect(
+      service.executeAction(
+        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        "run-1",
+      ),
+    ).rejects.toMatchObject({ code: "TAB_CHANGED" });
+  });
+
+  it("expires an unused navigation allowance after the next observation", async () => {
+    let activeUrl = "https://example.com/start";
+    const adapter = createAdapter({
+      queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: activeUrl }]),
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        if ("type" in message && message.type === "PAGE_OBSERVE") {
+          return Promise.resolve({ id: message.id, ok: true, data: pageSnapshot(activeUrl) });
+        }
+        return Promise.resolve({ id: message.id, ok: true, data: { message: "Clicked." } });
+      },
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+    await service.executeAction(
+      { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+      "run-1",
+    );
+    await service.observeActivePage("run-1");
+    activeUrl = "https://example.com/unexpected";
 
     await expect(service.observeActivePage("run-1")).rejects.toMatchObject({
       code: "TAB_CHANGED",
