@@ -1,5 +1,5 @@
 import { createVisionContent, type AssistantMessage, type ChatRequest } from "../shared/llm";
-import type { PageAnalysisResult, PageSnapshot } from "../shared/page";
+import { providerSafePageUrl, type PageAnalysisResult, type PageSnapshot } from "../shared/page";
 import type { ProviderSettings } from "../shared/settings";
 import { ProviderError } from "./openai-client";
 
@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = [
 
 function pageContext(snapshot: PageSnapshot): string {
   return JSON.stringify({
-    url: snapshot.url,
+    url: providerSafePageUrl(snapshot.url),
     title: snapshot.title,
     viewport: snapshot.viewport,
     visibleText: snapshot.visibleText,
@@ -73,6 +73,7 @@ export class PageAnalysisService {
       ],
       temperature: 0.1,
       maxTokens: 1500,
+      ...(settings.provider === "local" ? { reasoningEffort: "none" as const } : {}),
     });
     return {
       answer: analysisAnswer(message),

@@ -51,6 +51,19 @@ export interface PageAnalysisResult {
   screenshotUsed: boolean;
 }
 
+export function providerSafePageUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+export function providerSafePageSnapshot(snapshot: PageSnapshot): PageSnapshot {
+  return { ...snapshot, url: providerSafePageUrl(snapshot.url) };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
