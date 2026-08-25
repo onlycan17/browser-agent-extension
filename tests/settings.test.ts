@@ -17,7 +17,6 @@ const validLocalSettings = {
   baseUrl: `${LOCAL_BASE_URL}/`,
   model: ` ${DEFAULT_LOCAL_MODEL} `,
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 describe("provider settings", () => {
@@ -38,7 +37,6 @@ describe("provider settings", () => {
         baseUrl: LOCAL_BASE_URL,
         model: DEFAULT_LOCAL_MODEL,
         rememberApiKey: false,
-        maxAgentSteps: 8,
       },
     });
   });
@@ -54,7 +52,6 @@ describe("provider settings", () => {
       model,
       apiKey: " secret-key ",
       rememberApiKey: true,
-      maxAgentSteps: 4,
     });
 
     expect(result).toMatchObject({ ok: true, value: { provider, baseUrl, apiKey: "secret-key" } });
@@ -66,7 +63,6 @@ describe("provider settings", () => {
       baseUrl: "https://llm.example.com/openai/v1/",
       model: "example-model",
       rememberApiKey: false,
-      maxAgentSteps: 5,
     });
 
     expect(result).toMatchObject({
@@ -75,12 +71,16 @@ describe("provider settings", () => {
     });
   });
 
+  it("ignores the legacy maxAgentSteps field", () => {
+    const result = parseProviderSettings({ ...validLocalSettings, maxAgentSteps: 12 });
+
+    expect(result).toMatchObject({ ok: true, value: { provider: "local" } });
+    if (result.ok) expect(result.value).not.toHaveProperty("maxAgentSteps");
+  });
+
   it.each([
     [{ ...validLocalSettings, provider: "unknown" }, "Provider is invalid."],
     [{ ...validLocalSettings, baseUrl: OPENAI_BASE_URL }, "Base URL is not allowed"],
-    [{ ...validLocalSettings, maxAgentSteps: 0 }, "Agent steps must"],
-    [{ ...validLocalSettings, maxAgentSteps: 13 }, "Agent steps must"],
-    [{ ...validLocalSettings, maxAgentSteps: 1.5 }, "Agent steps must"],
     [{ ...validLocalSettings, model: " " }, "Model is required."],
     [
       {

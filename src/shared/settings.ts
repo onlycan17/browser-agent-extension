@@ -28,7 +28,6 @@ export interface ProviderSettings {
   baseUrl: string;
   model: string;
   rememberApiKey: boolean;
-  maxAgentSteps: number;
   apiKey?: string;
 }
 
@@ -43,7 +42,6 @@ export const DEFAULT_SETTINGS: Readonly<ProviderSettings> = {
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 export function providerRequestTimeoutMs(provider: ProviderId): number {
@@ -98,16 +96,6 @@ function parseModel(record: Record<string, unknown>): ValidationResult<string> {
     : { ok: true, value: model };
 }
 
-function parseAgentSteps(record: Record<string, unknown>): ValidationResult<number> {
-  if (!Number.isInteger(record.maxAgentSteps)) {
-    return { ok: false, error: "Agent steps must be an integer from 1 to 12." };
-  }
-  const steps = Number(record.maxAgentSteps);
-  return steps >= 1 && steps <= 12
-    ? { ok: true, value: steps }
-    : { ok: false, error: "Agent steps must be an integer from 1 to 12." };
-}
-
 function buildSettings(
   record: Record<string, unknown>,
   provider: ProviderId,
@@ -118,8 +106,6 @@ function buildSettings(
   if (typeof record.rememberApiKey !== "boolean") {
     return { ok: false, error: "Secret storage preference is invalid." };
   }
-  const maxAgentSteps = parseAgentSteps(record);
-  if (!maxAgentSteps.ok) return maxAgentSteps;
   const apiKey = parseApiKey(record);
   if (!apiKey.ok) return apiKey;
   const settings = {
@@ -127,7 +113,6 @@ function buildSettings(
     baseUrl,
     model: model.value,
     rememberApiKey: record.rememberApiKey,
-    maxAgentSteps: maxAgentSteps.value,
   };
   return apiKey.value === undefined
     ? { ok: true, value: settings }
@@ -149,6 +134,5 @@ export function withoutApiKey(settings: ProviderSettings): Omit<ProviderSettings
     baseUrl: settings.baseUrl,
     model: settings.model,
     rememberApiKey: settings.rememberApiKey,
-    maxAgentSteps: settings.maxAgentSteps,
   };
 }

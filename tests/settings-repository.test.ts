@@ -40,7 +40,6 @@ const localSettings = {
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
   rememberApiKey: false,
-  maxAgentSteps: 8,
 };
 
 describe("SettingsRepository", () => {
@@ -51,6 +50,13 @@ describe("SettingsRepository", () => {
       ...localSettings,
       hasApiKey: false,
     });
+  });
+
+  it("loads legacy settings without retaining maxAgentSteps", async () => {
+    const { local, repository } = createRepository();
+    local.values.set("browserAgent.settings", { ...localSettings, maxAgentSteps: 12 });
+
+    await expect(repository.loadRuntime()).resolves.toEqual(localSettings);
   });
 
   it("clears an unscoped legacy secret instead of attaching it to defaults", async () => {
@@ -85,7 +91,6 @@ describe("SettingsRepository", () => {
       baseUrl: OPENAI_BASE_URL,
       model: "gpt-4.1-mini",
       rememberApiKey: false,
-      maxAgentSteps: 6,
     };
     await repository.save({ ...openAiSettings, apiKey: "openai-secret" });
 
@@ -107,7 +112,6 @@ describe("SettingsRepository", () => {
       baseUrl: OPENAI_BASE_URL,
       model: "gpt-4.1-mini",
       rememberApiKey: true,
-      maxAgentSteps: 6,
       apiKey: "openai-secret",
     });
 
@@ -126,7 +130,6 @@ describe("SettingsRepository", () => {
       baseUrl: "https://first.example.com/v1",
       model: "example-model",
       rememberApiKey: false,
-      maxAgentSteps: 6,
     };
     await repository.save({ ...customSettings, apiKey: "first-origin-secret" });
 
@@ -146,7 +149,6 @@ describe("SettingsRepository", () => {
       baseUrl: "https://llm.example.com/v1",
       model: "example-model",
       rememberApiKey: false,
-      maxAgentSteps: 6,
     };
     await repository.save({ ...customSettings, apiKey: "same-origin-secret" });
 
@@ -166,7 +168,6 @@ describe("SettingsRepository", () => {
       baseUrl: OPENAI_BASE_URL,
       model: "gpt-4.1-mini",
       rememberApiKey: true,
-      maxAgentSteps: 6,
       apiKey: "orphaned-openai-key",
     });
     local.values.delete("browserAgent.settings");
@@ -184,7 +185,6 @@ describe("SettingsRepository", () => {
       baseUrl: "https://llm.example.com/v1",
       model: "example-model",
       rememberApiKey: false,
-      maxAgentSteps: 6,
       apiKey: "orphaned-custom-key",
     });
     local.values.set("browserAgent.settings", {
@@ -192,7 +192,6 @@ describe("SettingsRepository", () => {
       baseUrl: "http://llm.example.com/v1",
       model: "example-model",
       rememberApiKey: false,
-      maxAgentSteps: 6,
     });
 
     const settings = await repository.loadRuntime();
@@ -213,7 +212,7 @@ describe("SettingsRepository", () => {
   it("does not modify storage when validation fails", async () => {
     const { local, repository, session } = createRepository();
 
-    const result = await repository.save({ ...localSettings, maxAgentSteps: 50 });
+    const result = await repository.save({ ...localSettings, baseUrl: OPENAI_BASE_URL });
 
     expect(result.ok).toBe(false);
     expect(local.values.size).toBe(0);
