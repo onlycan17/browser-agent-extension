@@ -116,6 +116,8 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 - 기본 로컬 프로바이더에서 모델 목록 및 채팅 연결 검사가 성공한다.
 - OpenAI, Anthropic, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI와 HTTPS OpenAI-compatible custom 프로바이더를 선택하고 설정할 수 있다.
 - 일반 웹 페이지에서 관찰, 화면 분석, 클릭, 안전한 텍스트 입력, 스크롤이 동작한다.
+- 화면 캡처 권한이 만료되면 대상 탭에서 toolbar action을 다시 클릭하도록 안내한다.
+- Local provider 화면 분석은 Side Panel에서 Local Network Access probe를 먼저 수행하고, Service Worker 요청도 실패할 때 권한과 서버 상태를 함께 안내한다.
 - YouTube에서 상태 읽기와 재생 제어가 동작한다.
 - 모델이 tool call을 반환하면 최대 단계와 정책을 준수해 실행한다.
 - 위험 동작과 비밀번호 입력이 차단된다.

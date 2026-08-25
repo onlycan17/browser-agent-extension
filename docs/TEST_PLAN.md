@@ -87,6 +87,8 @@
 - Local 및 사용 가능한 Cloud provider 연결 검사
 - Custom HTTPS origin 권한 승인·거부와 provider 전환 권한 정리
 - 현재 화면 텍스트 분석
+- 화면 캡처 API 거부 시 toolbar action 재클릭 안내
+- Local provider 화면 분석 전 document-context Local Network Access probe와 이중 실패 안내
 - 입력 필드 값 설정
 - 버튼 클릭과 스크롤
 - stale element 오류 후 재관찰

@@ -272,6 +272,8 @@ Provider registry의 protocol이 `anthropic`이면 native client를 사용하고
 
 - `INVALID_MESSAGE`: 내부 메시지 스키마 불일치
 - `UNSUPPORTED_PAGE`: script를 주입할 수 없는 페이지
+- `TAB_ACCESS_REQUIRED`: toolbar action 재클릭이 필요한 임시 탭 권한 만료
+- `CAPTURE_FAILED`: Chrome 화면 캡처 거부 또는 유효하지 않은 이미지 반환
 - `STALE_ELEMENT`: 관찰 세대가 현재 DOM과 다름
 - `ELEMENT_NOT_FOUND`: element ID가 존재하지 않음
 - `UNSAFE_ACTION`: 정책상 금지된 동작
