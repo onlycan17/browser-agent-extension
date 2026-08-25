@@ -266,7 +266,7 @@ Content-Type: application/json  # POST only
 
 ### Provider routing
 
-Provider registry의 protocol이 `anthropic`이면 native client를 사용하고 나머지는 OpenAI-compatible client를 사용한다. Custom Base URL은 HTTPS만 허용되며 사용자 승인 origin의 optional host permission이 있어야 한다.
+Provider registry의 protocol이 `anthropic`이면 native client를 사용하고 나머지는 OpenAI-compatible client를 사용한다. Local provider 화면 분석은 reasoning token이 최종 답변 예산을 소진하지 않도록 `reasoning_effort: "none"`을 전송한다. Custom Base URL은 HTTPS만 허용되며 사용자 승인 origin의 optional host permission이 있어야 한다.
 
 ## 5. 에러 코드
 

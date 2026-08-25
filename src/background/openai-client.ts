@@ -88,6 +88,9 @@ export class OpenAICompatibleClient {
       stream: false,
       temperature: request.temperature ?? 0.2,
       max_tokens: request.maxTokens ?? 2048,
+      ...(request.reasoningEffort === undefined
+        ? {}
+        : { reasoning_effort: request.reasoningEffort }),
       ...(request.tools === undefined ? {} : { tools: request.tools, tool_choice: "auto" }),
     };
     const options = {

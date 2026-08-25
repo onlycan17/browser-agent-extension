@@ -49,12 +49,15 @@ export interface ToolDefinition {
   };
 }
 
+export type ReasoningEffort = "none" | "low" | "medium" | "high";
+
 export interface ChatRequest {
   messages: ChatMessage[];
   tools?: ToolDefinition[];
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface ConnectionTestResult {

@@ -157,6 +157,7 @@ describe("OpenAICompatibleClient", () => {
     );
 
     expect(requests[0]?.input).toBe("https://llm.example.com/openai/v1/chat/completions");
+    expect(readBody(requests[0])).not.toHaveProperty("reasoning_effort");
   });
 
   it("sends image content and parses tool calls", async () => {
@@ -188,6 +189,7 @@ describe("OpenAICompatibleClient", () => {
         },
       ],
       tools: [clickTool],
+      reasoningEffort: "none",
     });
 
     const body = readBody(requests[0]);
@@ -196,6 +198,7 @@ describe("OpenAICompatibleClient", () => {
       model: DEFAULT_LOCAL_MODEL,
       tools: [clickTool],
       tool_choice: "auto",
+      reasoning_effort: "none",
       messages: [
         {
           content: [
