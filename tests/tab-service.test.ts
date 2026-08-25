@@ -111,6 +111,23 @@ describe("TabService", () => {
     expect(injected).toBe(1);
   });
 
+  it("does not dispatch an action after the run is aborted", async () => {
+    const baseAdapter = createAdapter();
+    const send = vi.fn((tabId: number, message: unknown) => baseAdapter.send(tabId, message));
+    const service = new TabService(createAdapter({ send }));
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      service.executeAction(
+        { type: "PAGE_SCROLL", payload: { direction: "down", amount: 200 } },
+        "run-aborted",
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("rejects an agent action after the active tab changes", async () => {
     let activeTabId = 4;
     const adapter = createAdapter({
