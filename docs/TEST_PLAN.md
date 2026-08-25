@@ -75,6 +75,7 @@
 - mock Chrome API로 Side Panel ↔ Service Worker 메시지 왕복
 - mock content port로 observe/action 흐름
 - mock LLM server로 tool call 전체 사이클
+- Local 화면 분석은 `reasoning_effort: "none"`, Cloud 화면 분석은 기존 요청 계약 유지
 - 실제 로컬 `/v1/models` 연결 검사는 별도 network test로 분리
 - Cloud provider는 API key 없이 mock contract test를 실행하고 실제 key 검사는 수동 QA로 분리
 
@@ -89,10 +90,14 @@
 - 현재 화면 텍스트 분석
 - 화면 캡처 API 거부 시 toolbar action 재클릭 안내
 - Local provider 화면 분석 전 document-context Local Network Access probe와 이중 실패 안내
+- Local reasoning 모델이 빈 content 대신 최종 화면 분석을 반환하는지 확인
 - 입력 필드 값 설정
 - 버튼 클릭과 스크롤
 - stale element 오류 후 재관찰
-- 실행 중 탭 전환, 동일 탭 navigation, 메시지 처리 중 navigation 중단
+- 승인된 클릭·Enter의 same-origin navigation 후 pin URL 갱신과 새 페이지 재관찰
+- 클릭·Enter 또는 unload 응답 실패 뒤 같은 batch의 남은 도구를 deferred 처리하고 새 snapshot 전에는 실행하지 않는지 확인
+- 탭·창 전환, cross-origin 이동, 비-navigation 동작 중 URL 변경, allowance 소진 후 navigation 중단
+- agent와 화면 분석 provider 요청의 현재 페이지 URL이 origin만 포함하고 path, query, fragment를 제외하는지 확인
 
 ### YouTube
 

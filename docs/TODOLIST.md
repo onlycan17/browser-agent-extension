@@ -148,6 +148,7 @@
 - [x] Chrome 캡처 거부 시 toolbar action 재클릭 안내
 - [x] 화면 분석 전 document-context Local Network Access probe
 - [x] document와 Service Worker 이중 연결 실패 안내
+- [x] Local 화면 분석 reasoning 비활성화와 빈 content 회귀 테스트
 
 ## E. 페이지 동작
 
@@ -218,6 +219,11 @@
 - [x] provider 요청 시작 전·진행 중 AbortController 취소와 listener/timer 정리
 - [x] Side Panel 선발급 run ID로 즉시 취소 race 방지
 - [x] 실행 시작 탭·창·URL 고정 및 메시지 전후 탭 전환/navigation 시 중단
+- [x] 승인된 클릭·Enter의 bounded same-origin navigation 후 pin 갱신
+- [x] navigation-capable action 뒤 남은 tool call deferred 처리와 강제 재관찰
+- [x] action unload 응답 실패 뒤 one-shot navigation recovery
+- [x] provider-bound 현재 페이지 URL origin 최소화
+- [x] navigation allowance 소진과 탭·창·origin 경계 회귀 테스트
 - [x] 동일 실패 동작 반복 방지
 - [x] 재시작 시 안전 취소 정책
 - [x] 정상·실패·취소·한도 테스트
