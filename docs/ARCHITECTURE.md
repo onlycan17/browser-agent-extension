@@ -58,7 +58,8 @@ Current Web Page
 4. Service Worker가 Chrome의 마지막 포커스 창에서 활성 탭을 확인하고 해당 실행을 탭 ID, 창 ID, 시작 URL에 고정한다.
 5. Content Script가 `PAGE_OBSERVE`를 받아 구조화된 snapshot을 반환한다.
 6. 화면이 필요한 경우 Service Worker가 PNG 캡처를 추가한다.
-7. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 텍스트와 선택적 이미지를 보낸다.
+7. Provider에 전달할 snapshot의 현재 페이지 URL은 origin만 남기고 path, query, fragment를 제거한다. 내부 탭 고정과 UI 결과는 원본 URL을 유지한다.
+8. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 텍스트와 선택적 이미지를 보낸다.
 
 ### 도구 실행
 
@@ -66,9 +67,10 @@ Current Web Page
 2. 도구별 validator가 정확한 스키마를 검사한다.
 3. SafetyPolicy가 차단, 승인 필요, 즉시 허용 중 하나를 반환한다.
 4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 승인 요청을 보낸다.
-5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭 전환이나 동일 탭 navigation이 발생하면 실행을 중단한다.
-6. 허용된 명령만 Content Script 또는 Chrome API로 전달한다.
-7. 실행 결과를 `role: tool` 메시지로 모델에 반환한다.
+5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭·창 전환과 예상하지 않은 navigation은 실행을 중단한다. 사용자 승인 후 실행한 클릭 또는 Enter는 다음 관찰까지 same-origin navigation 1회를 허용하고 pin URL을 갱신한다.
+6. 클릭 또는 Enter를 실행하면 같은 모델 응답의 남은 tool call은 deferred 결과로 닫고 새 snapshot을 관찰한 뒤 다음 모델 단계에서 다시 판단한다. action 응답이 unload로 유실돼도 allowance는 이 관찰까지만 유지된다.
+7. 허용된 명령만 Content Script 또는 Chrome API로 전달한다.
+8. 실행 결과를 `role: tool` 메시지로 모델에 반환한다.
 
 ## 4. 빌드 구조
 

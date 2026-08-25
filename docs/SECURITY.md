@@ -66,6 +66,7 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - password, hidden, file 입력의 값은 수집하지 않는다.
 - 모든 입력 필드의 현재 값은 제외한다.
 - 링크는 origin만 수집하고 path, query, fragment를 모델에 전달하지 않는다.
+- 현재 페이지 URL도 provider 요청에서 origin으로 축소해 path, query, fragment의 토큰이 모델에 노출되지 않게 한다.
 - 스크린샷은 사용자가 요청했거나 시각 분석을 선택한 경우에만 캡처한다.
 - 요청 종료 후 스크린샷 데이터 URL은 저장하지 않는다.
 - 답변 복사와 공유는 완료·중지된 답변에서 사용자가 버튼을 누른 경우에만 실행한다.
@@ -81,6 +82,7 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - element ID는 현재 관찰 세대에서만 유효하다.
 - password, file, hidden 필드 입력은 항상 차단한다.
 - 모든 클릭은 사이트 정의 부작용 가능성이 있으므로 사용자 승인을 요구한다.
+- 클릭 또는 Enter 뒤에는 같은 모델 응답의 남은 도구를 실행하지 않고 새 페이지를 재관찰한다.
 
 ## 7. 승인 정책
 
