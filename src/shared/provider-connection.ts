@@ -26,22 +26,30 @@ export async function requestLocalNetworkAccess(
   }
 }
 
-export async function testProviderConnection(
+function needsLocalNetworkHint(probeSucceeded: boolean, error: unknown): boolean {
+  return (
+    !probeSucceeded && error instanceof RuntimeRequestError && error.code === "PROVIDER_UNREACHABLE"
+  );
+}
+
+export async function runProviderRequest<T>(
+  settings: SettingsSummary,
+  request: () => Promise<T>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<T> {
+  const probeSucceeded = await requestLocalNetworkAccess(settings, fetchImpl);
+  try {
+    return await request();
+  } catch (error: unknown) {
+    if (needsLocalNetworkHint(probeSucceeded, error)) throw new LocalNetworkAccessError();
+    throw error;
+  }
+}
+
+export function testProviderConnection(
   settings: SettingsSummary,
   testConnection: () => Promise<ConnectionTestResult>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ConnectionTestResult> {
-  const probeSucceeded = await requestLocalNetworkAccess(settings, fetchImpl);
-  try {
-    return await testConnection();
-  } catch (error: unknown) {
-    if (
-      !probeSucceeded &&
-      error instanceof RuntimeRequestError &&
-      error.code === "PROVIDER_UNREACHABLE"
-    ) {
-      throw new LocalNetworkAccessError();
-    }
-    throw error;
-  }
+  return runProviderRequest(settings, testConnection, fetchImpl);
 }

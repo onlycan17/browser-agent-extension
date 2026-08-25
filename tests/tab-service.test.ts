@@ -252,6 +252,22 @@ describe("TabService", () => {
     expect(observedTabIds).toEqual([5, 5]);
   });
 
+  it("maps a denied Chrome capture to an actionable page access error", async () => {
+    const service = new TabService(
+      createAdapter({
+        capture: () => Promise.reject(new Error("Active tab permission is unavailable.")),
+      }),
+    );
+
+    await expect(service.captureActivePage()).rejects.toEqual(
+      new PageAccessError(
+        "CAPTURE_FAILED",
+        "Chrome could not capture this page. Return to the target tab and click the Browser Agent toolbar icon, then try again.",
+        true,
+      ),
+    );
+  });
+
   it("paces repeated screenshots below Chrome's capture limit", async () => {
     let now = 1_000;
     const delays: number[] = [];

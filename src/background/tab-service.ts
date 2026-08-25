@@ -115,7 +115,7 @@ export class TabService {
     const tab = await this.tabForRun(runId);
     const elapsed = this.now() - this.lastCaptureAt;
     if (elapsed < 550) await this.delay(550 - elapsed);
-    const dataUrl = await this.adapter.capture(tab.windowId);
+    const dataUrl = await this.capture(tab.windowId);
     if (runId !== undefined) await this.tabForRun(runId);
     this.lastCaptureAt = this.now();
     if (!dataUrl.startsWith("data:image/")) {
@@ -126,6 +126,18 @@ export class TabService {
       );
     }
     return dataUrl;
+  }
+
+  private async capture(windowId: number): Promise<string> {
+    try {
+      return await this.adapter.capture(windowId);
+    } catch {
+      throw new PageAccessError(
+        "CAPTURE_FAILED",
+        "Chrome could not capture this page. Return to the target tab and click the Browser Agent toolbar icon, then try again.",
+        true,
+      );
+    }
   }
 
   private async validateRunSnapshot(runId: string, snapshot: PageSnapshot): Promise<void> {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   LocalNetworkAccessError,
   requestLocalNetworkAccess,
+  runProviderRequest,
   testProviderConnection,
 } from "../src/shared/provider-connection";
 import { RuntimeRequestError } from "../src/shared/runtime-client";
@@ -63,6 +64,41 @@ describe("local provider connection", () => {
 
     expect(events).toEqual(["probe", "worker"]);
     expect(result.selectedModelAvailable).toBe(true);
+  });
+
+  it("runs an analysis request after the document probe", async () => {
+    const events: string[] = [];
+
+    const result = await runProviderRequest(
+      localSettings,
+      () => {
+        events.push("worker");
+        return Promise.resolve({ answer: "Visible page summary" });
+      },
+      () => {
+        events.push("probe");
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+    );
+
+    expect(events).toEqual(["probe", "worker"]);
+    expect(result).toEqual({ answer: "Visible page summary" });
+  });
+
+  it("adds a local-network hint to an unreachable analysis request", async () => {
+    const providerError = new RuntimeRequestError(
+      "PROVIDER_UNREACHABLE",
+      "The model provider could not be reached.",
+      true,
+    );
+
+    await expect(
+      runProviderRequest(
+        localSettings,
+        () => Promise.reject(providerError),
+        () => Promise.reject(new TypeError("Failed to fetch")),
+      ),
+    ).rejects.toEqual(new LocalNetworkAccessError());
   });
 
   it("adds a local-network hint only when both local requests are unreachable", async () => {

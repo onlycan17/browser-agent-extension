@@ -145,6 +145,9 @@
 - [x] capture rate guard
 - [x] data URL 저장 금지
 - [x] 캡처 오류 매핑 테스트
+- [x] Chrome 캡처 거부 시 toolbar action 재클릭 안내
+- [x] 화면 분석 전 document-context Local Network Access probe
+- [x] document와 Service Worker 이중 연결 실패 안내
 
 ## E. 페이지 동작
 
