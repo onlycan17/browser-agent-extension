@@ -48,6 +48,21 @@ function isSupportedUrl(value: string): boolean {
   }
 }
 
+function hasSameOrigin(first: string, second: string): boolean {
+  try {
+    return new URL(first).origin === new URL(second).origin;
+  } catch {
+    return false;
+  }
+}
+
+function mayNavigate(action: PageActionRequest): boolean {
+  return (
+    action.type === "PAGE_CLICK" ||
+    (action.type === "PAGE_PRESS_KEY" && action.payload.key === "Enter")
+  );
+}
+
 export function createChromeTabAdapter(): BrowserTabAdapter {
   return {
     queryActive: () => chrome.tabs.query({ active: true, lastFocusedWindow: true }),
@@ -62,6 +77,7 @@ export function createChromeTabAdapter(): BrowserTabAdapter {
 export class TabService {
   private lastCaptureAt = Number.NEGATIVE_INFINITY;
   private readonly pinnedTabs = new Map<string, TabContext>();
+  private readonly navigationAllowances = new Set<string>();
 
   constructor(
     private readonly adapter: BrowserTabAdapter,
@@ -72,10 +88,12 @@ export class TabService {
 
   async pinActivePage(runId: string): Promise<void> {
     this.pinnedTabs.set(runId, await this.activeTab());
+    this.navigationAllowances.delete(runId);
   }
 
   releasePinnedPage(runId: string): void {
     this.pinnedTabs.delete(runId);
+    this.navigationAllowances.delete(runId);
   }
 
   async observeActivePage(runId?: string): Promise<PageSnapshot> {
@@ -97,6 +115,7 @@ export class TabService {
   async executeAction(action: PageActionRequest, runId?: string): Promise<PageActionResult> {
     const tab = await this.tabForRun(runId);
     await this.ensureContentScript(tab.id);
+    if (runId !== undefined && mayNavigate(action)) this.navigationAllowances.add(runId);
     const id = crypto.randomUUID();
     const response = await this.adapter.send(tab.id, { id, ...action });
     const result = parseActionResponse(response, id);
@@ -141,8 +160,9 @@ export class TabService {
   }
 
   private async validateRunSnapshot(runId: string, snapshot: PageSnapshot): Promise<void> {
-    await this.tabForRun(runId);
-    if (this.pinnedTabs.get(runId)?.url === snapshot.url) return;
+    const tab = await this.tabForRun(runId);
+    this.navigationAllowances.delete(runId);
+    if (tab.url === snapshot.url) return;
     throw this.tabChangedError();
   }
 
@@ -158,14 +178,18 @@ export class TabService {
     const active = await this.activeTab();
     if (runId === undefined) return active;
     const pinned = this.pinnedTabs.get(runId);
-    if (
-      pinned?.id !== active.id ||
-      pinned.windowId !== active.windowId ||
-      pinned.url !== active.url
-    ) {
+    if (pinned?.id !== active.id || pinned.windowId !== active.windowId) {
+      this.navigationAllowances.delete(runId);
       throw this.tabChangedError();
     }
-    return active;
+    if (pinned.url === active.url) return active;
+    if (this.navigationAllowances.has(runId) && hasSameOrigin(pinned.url, active.url)) {
+      this.pinnedTabs.set(runId, active);
+      this.navigationAllowances.delete(runId);
+      return active;
+    }
+    this.navigationAllowances.delete(runId);
+    throw this.tabChangedError();
   }
 
   private async activeTab(): Promise<TabContext> {
