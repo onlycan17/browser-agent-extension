@@ -51,7 +51,6 @@ interface ErrorResponse {
   model: string;
   apiKey?: string;
   rememberApiKey: boolean;
-  maxAgentSteps: number;
 }
 ```
 
@@ -282,5 +281,5 @@ Provider registry의 protocol이 `anthropic`이면 native client를 사용하고
 - `PROVIDER_TIMEOUT`: 외부 요청 시간 초과 (Local 480초, OpenAI 45초, 기타 Cloud/Custom 120초)
 - `PROVIDER_REJECTED`: 인증 또는 요청 형식 오류
 - `MODEL_PROTOCOL_ERROR`: 모델 응답 또는 tool arguments 파싱 실패
-- `AGENT_STEP_LIMIT`: 최대 단계 도달
+- `AGENT_SAFETY_LIMIT`: 동일 상태·동작 3회 정체, 100단계 또는 30분 안전 한도 도달
 - `AGENT_CANCELLED`: 사용자 중단
