@@ -26,6 +26,16 @@ const scrollCall: ToolCall = {
   type: "function",
   function: { name: "scroll_page", arguments: '{"direction":"down","amount":500}' },
 };
+const clickCall: ToolCall = {
+  id: "call-click",
+  type: "function",
+  function: { name: "click_element", arguments: '{"generation":1,"elementId":"target"}' },
+};
+const enterCall: ToolCall = {
+  id: "call-enter",
+  type: "function",
+  function: { name: "press_key", arguments: '{"key":"Enter"}' },
+};
 
 function tabs() {
   return {
@@ -99,6 +109,56 @@ describe("AgentRunner", () => {
     expect(completion).toBe(2);
     expect(events.some((event) => event.type === "AGENT_PROGRESS")).toBe(true);
     expect(events.at(-1)?.type).toBe("AGENT_FINISHED");
+  });
+
+  it.each([
+    { label: "click", call: clickCall, actionFailed: false },
+    { label: "Enter", call: enterCall, actionFailed: false },
+    { label: "failed click", call: clickCall, actionFailed: true },
+  ])("re-observes after $label before later calls", async ({ call, actionFailed }) => {
+    let completion = 0;
+    const executed: string[] = [];
+    const requests: unknown[] = [];
+    const sensitiveSnapshot = {
+      ...snapshot,
+      url: "https://example.com/reset/private-token?code=secret#fragment",
+    };
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        observeActivePage: () => Promise.resolve(sensitiveSnapshot),
+      },
+      {
+        complete: (_settings, request) => {
+          completion += 1;
+          requests.push(request);
+          return Promise.resolve(
+            completion === 1
+              ? { role: "assistant" as const, content: null, tool_calls: [call, scrollCall] }
+              : { role: "assistant" as const, content: "Finished safely" },
+          );
+        },
+      },
+      {
+        execute: (call) => {
+          executed.push(call.function.name);
+          return successfulTool(actionFailed).execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-navigation", "Click and continue", false);
+
+    const serializedRequests = JSON.stringify(requests);
+    expect(result.answer).toBe("Finished safely");
+    expect(executed).toEqual([call.function.name]);
+    expect(serializedRequests).toContain("Deferred until a fresh page observation.");
+    expect(serializedRequests).toContain('\\"url\\":\\"https://example.com\\"');
+    expect(serializedRequests).not.toContain("private-token");
+    expect(serializedRequests).not.toContain("code=secret");
   });
 
   it("does not execute the same failed tool twice", async () => {
