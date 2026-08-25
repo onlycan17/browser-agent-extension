@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Agent 설정</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <main class="settings-page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">BROWSER AGENT / CONFIGURATION</p>
+          <h1>모델 연결을<br />정밀하게 조정합니다.</h1>
+        </div>
+        <div class="header-stamp" aria-hidden="true">
+          <span>MV3</span>
+          <strong>116+</strong>
+        </div>
+      </header>
+
+      <div class="settings-grid">
+        <aside class="rail" aria-label="설정 안내">
+          <p class="rail-index">01</p>
+          <h2>Provider</h2>
+          <p>로컬 모델, 주요 LLM API 또는 승인한 custom endpoint를 선택합니다.</p>
+          <div class="rail-rule"></div>
+          <p class="rail-index">SECURITY</p>
+          <p>API 키는 기본적으로 현재 브라우저 세션에만 저장됩니다.</p>
+        </aside>
+
+        <form id="settings-form" class="settings-form">
+          <section class="form-section" aria-labelledby="provider-heading">
+            <div class="section-title">
+              <span>01</span>
+              <div>
+                <h2 id="provider-heading">모델 제공자</h2>
+                <p>통신 대상과 모델 식별자를 지정합니다.</p>
+              </div>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Provider</span>
+                <select id="provider" name="provider">
+                  <option value="local">Local / LM Studio</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="groq">Groq</option>
+                  <option value="together">Together AI</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="mistral">Mistral AI</option>
+                  <option value="xai">xAI</option>
+                  <option value="custom">Custom / OpenAI-compatible</option>
+                </select>
+              </label>
+
+              <label class="field field--wide">
+                <span>Base URL</span>
+                <input id="base-url" name="baseUrl" type="url" readonly required />
+                <small id="base-url-help">보안을 위해 provider의 공식 origin만 사용합니다.</small>
+              </label>
+
+              <label class="field field--wide">
+                <span>Model ID</span>
+                <input id="model" name="model" type="text" maxlength="160" required />
+              </label>
+            </div>
+
+            <div id="local-warning" class="notice notice--warning">
+              <strong>LAN 전송 주의</strong>
+              <p>로컬 HTTP 연결은 암호화되지 않습니다. 신뢰할 수 있는 네트워크에서만 사용하세요.</p>
+            </div>
+
+            <div id="custom-warning" class="notice notice--warning" hidden>
+              <strong>Custom endpoint 권한</strong>
+              <p>
+                HTTPS endpoint만 허용됩니다. 저장할 때 선택한 origin의 접근 권한을 Chrome에서
+                확인합니다.
+              </p>
+            </div>
+          </section>
+
+          <section class="form-section" aria-labelledby="credential-heading">
+            <div class="section-title">
+              <span>02</span>
+              <div>
+                <h2 id="credential-heading">자격 증명</h2>
+                <p>기존 키는 화면에 다시 표시되지 않습니다.</p>
+              </div>
+            </div>
+
+            <label class="field field--wide">
+              <span>API key <em>선택 사항</em></span>
+              <input
+                id="api-key"
+                name="apiKey"
+                type="password"
+                autocomplete="new-password"
+                maxlength="4096"
+                placeholder="새 키를 입력할 때만 작성"
+              />
+              <small id="provider-key-help">Cloud provider는 발급받은 API key가 필요합니다.</small>
+              <small id="key-status">저장된 API 키가 없습니다.</small>
+            </label>
+
+            <label class="check-row" for="remember-api-key">
+              <input id="remember-api-key" name="rememberApiKey" type="checkbox" />
+              <span>
+                <strong>브라우저를 닫아도 API 키 유지</strong>
+                <small>Chrome 로컬 저장소는 운영체제 보안 키체인이 아닙니다.</small>
+              </span>
+            </label>
+          </section>
+
+          <section class="form-section" aria-labelledby="agent-heading">
+            <div class="section-title">
+              <span>03</span>
+              <div>
+                <h2 id="agent-heading">에이전트 한도</h2>
+                <p>한 작업에서 연속 실행할 수 있는 최대 단계입니다.</p>
+              </div>
+            </div>
+
+            <label class="field field--compact">
+              <span>Max agent steps</span>
+              <input
+                id="max-agent-steps"
+                name="maxAgentSteps"
+                type="number"
+                min="1"
+                max="12"
+                required
+              />
+              <small>권장값 8 · 허용 범위 1–12</small>
+            </label>
+          </section>
+
+          <div class="form-actions">
+            <p id="settings-status" role="status" aria-live="polite">설정을 불러오는 중입니다.</p>
+            <div>
+              <button id="test-button" class="button button--secondary" type="button">
+                저장 후 연결 확인
+              </button>
+              <button id="save-button" class="button button--primary" type="submit">
+                설정 저장
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </main>
+    <script type="module" src="settings.js"></script>
+  </body>
+</html>
