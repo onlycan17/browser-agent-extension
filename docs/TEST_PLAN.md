@@ -15,7 +15,7 @@
 
 - 10개 provider registry, 기본 Base URL/model/protocol/timeout
 - 고정 origin과 Custom HTTPS URL 정규화 검증
-- max steps 경계값 검증
+- legacy max steps 필드 제거 migration 검증
 - API key 마스킹, provider/origin scope 저장, provider 및 Custom origin 변경 시 제거
 - 누락·손상 설정 fallback과 scope 없는 legacy key 제거
 - Custom optional host permission 요청·거부·이전 origin 제거·저장 실패 rollback
@@ -37,7 +37,7 @@
 
 - 사용자와 에이전트 말풍선 역할 구분
 - 생각 중, 응답 완료, 중지, 오류 상태 라벨 갱신
-- 승인, 거부, 만료와 이전 실행의 늦은 승인 응답 상태 전환
+- 첫 승인 후 같은 run의 후속 confirm 자동 승인, 거부·만료·완료·취소 시 grant 격리
 - 응답 갱신 시 하단 자동 스크롤과 사용자의 이전 메시지 탐색 위치 보존
 - 제목, 목록, 강조, 인라인 코드의 안전한 Markdown 형식 렌더링
 - 모델이 반환한 HTML 문자열을 실행 가능한 DOM으로 삽입하지 않음
@@ -56,10 +56,14 @@
 
 - 텍스트 응답 종료
 - tool call → tool result → 최종 응답 반복
-- 최대 단계 종료
-- 실행 등록 전, provider 요청 시작 전, provider 요청 진행 중 사용자 취소
+- 12단계를 넘는 작업의 정상 완료
+- 동일 페이지·동작 3회 반복 정체 종료와 동적 숫자·bounds·재생 시간 잡음 무시
+- 서로 다른 text 입력 fingerprint를 진행으로 구분
+- 100단계와 단계 사이·진행 중 모델 호출의 30분 비상 안전 한도 종료
+- 실행 등록 전, provider 요청 시작 전, provider 요청·도구 실행 진행 중 사용자 취소
+- 안전 한도 종료 후 요청 전체 승인 grant 폐기
 - 동일 실패 도구 반복 방지
-- 승인 대기와 승인/거부 처리
+- 요청 전체 승인 카드와 승인/거부 처리, 후속 confirm 카드 미노출
 
 ### Content logic
 
@@ -110,7 +114,8 @@
 ### 보안
 
 - password 입력 차단
-- submit 동작 승인 카드
+- 첫 submit 동작의 요청 전체 승인 카드와 같은 run 후속 confirm 자동 실행
+- 승인 후에도 password/payment/OTP deny 유지
 - 승인 거부 후 실행 중단
 - Chrome 내부 페이지의 명확한 unsupported 안내
 - API key와 screenshot이 console에 없는지 확인

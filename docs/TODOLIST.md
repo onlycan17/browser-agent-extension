@@ -27,7 +27,7 @@
 - [x] local 기본 설정 상수 정의
 - [x] provider 설정 runtime validator 구현
 - [x] base URL 정규화와 allowlist 구현
-- [x] max agent steps 경계 검증
+- [x] legacy max agent steps 필드 제거 migration 검증
 - [x] 설정 모델 단위 테스트
 
 ### B-2. 안전한 저장
@@ -192,7 +192,9 @@
 
 - [x] approval ID와 만료 시간
 - [x] Side Panel 승인 카드
-- [x] 승인 후 한 번만 실행
+- [x] 첫 승인 후 같은 run의 후속 confirm 자동 승인
+- [x] run 완료·취소 시 요청 전체 승인 grant 폐기
+- [x] 요청 전체 승인 후에도 deny 정책 유지
 - [x] 거부와 timeout 후 실행 중단
 - [x] 승인 상태 통합 테스트
 
@@ -215,7 +217,9 @@
 - [x] 시스템 prompt와 페이지 데이터 경계
 - [x] 관찰 → 모델 → 정책 → 실행 반복
 - [x] role tool 결과 연결
-- [x] max step 제한
+- [x] 모델 최종 답변까지 완료 중심 실행
+- [x] 안정 page/action fingerprint 기반 3회 반복 정체 감지
+- [x] 전체 run에 적용되는 100단계·30분 비상 안전 한도
 - [x] provider 요청 시작 전·진행 중 AbortController 취소와 listener/timer 정리
 - [x] Side Panel 선발급 run ID로 즉시 취소 race 방지
 - [x] 실행 시작 탭·창·URL 고정 및 메시지 전후 탭 전환/navigation 시 중단
@@ -226,7 +230,7 @@
 - [x] navigation allowance 소진과 탭·창·origin 경계 회귀 테스트
 - [x] 동일 실패 동작 반복 방지
 - [x] 재시작 시 안전 취소 정책
-- [x] 정상·실패·취소·한도 테스트
+- [x] 정상·실패·진행 중 취소·동적 페이지 정체·비상 한도 테스트
 
 ### G-3. 진행 상태
 
@@ -284,7 +288,7 @@
 - [ ] 일반 페이지 관찰·입력·클릭·스크롤 수동 확인
 - [ ] 위험 동작 승인·거부 수동 확인
 - [ ] YouTube 상태·제어·프레임 분석 수동 확인
-- [x] 취소와 max step 자동 테스트
+- [x] 취소와 정체·100단계·30분 안전 한도 자동 테스트
 - [x] console error 부재
 - [x] 320px, 480px 무가로스크롤 및 필수 컨트롤
 
