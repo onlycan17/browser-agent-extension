@@ -31,7 +31,8 @@ Current Web Page
 - 사용자 요청과 실행 상태를 표시한다.
 - 프로바이더 설정과 연결 검사를 제공한다.
 - 위험 동작 승인 또는 거부를 서비스 워커에 전달한다.
-- 페이지 HTML을 직접 신뢰하거나 실행하지 않는다.
+- 이미지·UTF-8 텍스트·PDF를 요청 메모리에서 검증·추출하고 수락된 요청 뒤 제거한다.
+- 페이지 HTML과 첨부 HTML/PDF 내용을 직접 신뢰하거나 실행하지 않는다.
 
 ### Service Worker
 
@@ -43,41 +44,46 @@ Current Web Page
 
 ### Content Script
 
-- 현재 문서의 제한된 DOM 정보를 수집한다.
+- 현재 뷰포트와 교차하는 렌더링 텍스트와 상호작용 요소만 수집하며 입력값과 편집 중 초안은 제외한다.
 - 관찰 시점마다 짧은 수명의 element ID를 발급한다.
-- 허용된 명령만 수행하며 selector 또는 JavaScript 문자열을 실행하지 않는다.
+- 허용된 명령만 수행하며 selector 또는 JavaScript 문자열을 실행하지 않는다. 요소 동작은 관찰 상태 DOM guard가 실행 직전 상태와 일치할 때만 수행한다.
 - 페이지에서 받은 메시지는 확장 메시지로 간주하지 않는다.
 
 ## 3. 데이터 흐름
 
 ### 관찰
 
-1. Local provider 연결 확인 시 Side Panel 또는 설정 문서가 공통 helper의 무인증 `/models` probe로 Chrome의 Local Network Access 권한을 먼저 요청한다.
+1. Local provider 연결 확인과 agent 시작 시 Side Panel 또는 설정 문서가 공통 helper의 무인증 `/models` probe로 Chrome의 Local Network Access 권한을 먼저 요청한다.
 2. 사용자가 대상 탭에서 툴바 action을 클릭하면 background가 `chrome.sidePanel.open({ tabId })`로 tab-scoped panel을 열고 `activeTab` 권한을 획득한다.
-3. Side Panel이 선발급한 `runId`와 함께 `AGENT_RUN_REQUEST`를 보낸다.
-4. Service Worker가 Chrome의 마지막 포커스 창에서 활성 탭을 확인하고 해당 실행을 탭 ID, 창 ID, 시작 URL에 고정한다.
+3. Side Panel이 선발급한 `runId`, request-scoped attachment snapshot, `allowScreenshots`와 함께 `AGENT_RUN_REQUEST`를 보낸다.
+4. Service Worker가 attachment 계약을 다시 검증하고 Chrome의 마지막 포커스 창에서 활성 탭을 확인한 뒤 실행을 탭 ID, 창 ID, 시작 URL에 고정한다.
 5. Content Script가 `PAGE_OBSERVE`를 받아 구조화된 snapshot을 반환한다.
-6. 화면이 필요한 경우 Service Worker가 PNG 캡처를 추가한다.
+6. 최초 메시지는 DOM snapshot과 첨부만 포함한다. 화면 캡처가 허용된 요청에서만 모델이 시각 정보가 필요하거나 DOM 기반 진행이 막혔을 때 `capture_screen`으로 최신 visible viewport를 요청할 수 있다.
 7. Provider에 전달할 snapshot의 현재 페이지 URL은 origin만 남기고 path, query, fragment를 제거한다. 내부 탭 고정과 UI 결과는 원본 URL을 유지한다.
-8. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 텍스트와 선택적 이미지를 보낸다.
+8. 텍스트/PDF는 untrusted document block, 첨부 이미지와 화면 캡처는 multimodal image part로 구성한다.
+9. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 전송한다.
 
 ### 도구 실행
 
 1. 모델 응답의 `tool_calls[].function.arguments`를 JSON으로 파싱한다.
 2. 도구별 validator가 정확한 스키마를 검사한다.
 3. SafetyPolicy가 차단, 승인 필요, 즉시 허용 중 하나를 반환한다.
-4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다.
+4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다. 클릭·텍스트 입력은 관찰 당시 요소 상태를 DOM guard로 함께 전달하고 Content Script가 실행 직전에 동기적으로 재검증한다.
 5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭·창 전환과 예상하지 않은 navigation은 실행을 중단한다. 사용자 승인 후 실행한 클릭 또는 Enter는 다음 관찰까지 same-origin navigation 1회를 허용하고 pin URL을 갱신한다.
 6. 클릭 또는 Enter를 실행하면 같은 모델 응답의 남은 tool call은 deferred 결과로 닫고 새 snapshot을 관찰한 뒤 다음 모델 단계에서 다시 판단한다. action 응답이 unload로 유실돼도 allowance는 이 관찰까지만 유지된다.
-7. 허용된 명령만 Content Script 또는 Chrome API로 전달한다.
-8. 실행 결과를 `role: tool` 메시지로 모델에 반환한다.
+7. `capture_screen`은 사용자 허용, pinned tab/window/URL, Chrome rate limit, run당 6회 budget을 모두 만족할 때만 실행한다. 캡처 뒤 같은 응답의 남은 call은 deferred 처리한다.
+8. 허용된 명령만 Content Script 또는 Chrome API로 전달한다. 대상의 가시성, 의미, 입력 메타데이터 또는 위치가 관찰 이후 바뀌면 `STALE_ELEMENT`로 거부하고 새 snapshot에서 다시 판단한다.
+9. 실행 결과를 `role: tool` 메시지로 모델에 반환한다. 캡처 결과 자체는 저장하지 않고 다음 user multimodal message에만 포함한다.
 
 ### 실행 종료
 
-1. 모델이 tool call 없는 최종 텍스트를 반환하면 정상 완료한다.
-2. URL, viewport, 숫자형 시각 정보가 정규화된 visible text, 안정 element 속성, 안정 YouTube 상태와 tool call 묶음이 3회 반복되면 정체로 판단한다. 입력 text는 원문 대신 fingerprint로 비교한다.
-3. 정체하거나 100단계 또는 30분 비상 한도에 도달하면 `safety_limit`으로 종료한다. 30분 deadline은 초기 관찰부터 모델·승인·도구 대기까지 전체 run의 `AbortController`에 적용한다.
-4. 사용자의 중지 요청은 단계와 무관하게 동일한 `AbortController`로 진행 중 대기를 즉시 취소한다.
+1. `AGENT_RUN_REQUEST`는 장시간 일회성 message 응답 채널을 유지하지 않고 실행 등록 직후 시작 확인을 반환한다. Side Panel은 transport-level 확인 유실 시 같은 `runId`로 1회 재전송하며, Service Worker는 accepted/running/terminal run을 멱등 처리해 중복 실행을 막는다.
+2. Side Panel은 실행 중 20초 간격 heartbeat 요청으로 MV3 Service Worker의 유휴 종료를 방지한다. heartbeat는 활성 run, 최근 terminal event, 상태 유실을 구분해 event 유실과 Service Worker 재시작을 복구 가능한 오류로 종료한다.
+3. 모델이 tool call 없는 최종 텍스트를 반환하면 background가 terminal event로 결과를 Side Panel에 전달하고, 최근 20개 결과를 heartbeat 복구용 메모리 캐시에 유지한다.
+4. tool call과 trim된 텍스트가 모두 없는 응답은 history에 넣지 않고 명시적인 계속 요청을 추가한다. 연속 2회까지 재시도하고 세 번째 빈 응답은 `MODEL_PROTOCOL_ERROR` terminal event로 전달한다. Local agent 요청은 reasoning token이 출력 예산을 소진하지 않도록 `reasoning_effort: "none"`을 사용한다.
+5. URL, viewport, 숫자형 시각 정보가 정규화된 visible text, 안정 element 속성, 안정 YouTube 상태와 tool call 묶음이 두 번째 반복되면 run당 한 번만 다른 안전한 접근 방식을 요청한다. 입력 text는 원문 대신 fingerprint로 비교한다.
+6. 동일 전환이 세 번째에도 반복되거나 100단계 또는 30분 비상 한도에 도달하면 `safety_limit`으로 종료한다. 30분 deadline은 초기 관찰부터 모델·승인·도구 대기까지 전체 run의 `AbortController`에 적용한다.
+7. 사용자의 중지 요청은 단계와 무관하게 동일한 `AbortController`로 진행 중 대기를 즉시 취소하며, terminal event 후 heartbeat와 UI 실행 상태를 정리한다.
 
 ## 4. 빌드 구조
 
@@ -101,7 +107,7 @@ browser-agent-extension/
   vitest.config.ts
 ```
 
-esbuild는 Service Worker, Content Script, Side Panel, Settings 엔트리를 각각 분할 없는 독립 번들로 만든다. remote code를 사용하지 않고 모든 런타임 JavaScript와 CSS를 패키지에 포함한다.
+esbuild는 Service Worker, Content Script, Side Panel, Settings 엔트리를 각각 분할 없는 독립 번들로 만든다. remote code를 사용하지 않고 모든 런타임 JavaScript와 CSS를 패키지에 포함한다. PDF.js worker와 packed CMaps도 `dist/vendor/pdfjs/`에 복사해 extension package 안에서만 로드한다.
 
 ## 5. 권한 설계
 
@@ -152,6 +158,12 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 
 일반 DOM 도구로 비디오를 조작하지 않고 `<video>` 상태를 검증하는 전용 명령만 허용한다. 자막 추출은 페이지 변화에 취약하므로 가용할 때만 사용하는 보조 경로다.
 
-### ADR-007: 최상위 문서 관찰 우선
+전체 스크립트 탐색은 사이트별 selector나 추가 권한을 사용하지 않는다. shared prompt guidance는 최신 DOM snapshot에 이미 전체 스크립트가 있으면 이를 우선 사용하고, 없을 때만 현지화된 `More`/`Transcript` 계열 컨트롤을 정확한 일회성 element ID로 클릭한 뒤 재관찰하도록 지시한다. 관련 컨트롤을 최대 2회 조작으로 찾지 못하면 현재 관찰 데이터만 사용하고 한계를 알린다.
+
+### ADR-007: 요청 메모리 기반 첨부 처리
+
+첨부 원문은 Chrome storage, 로그, 채팅 HTML에 저장하지 않는다. Side Panel은 signature/MIME/크기/UTF-8을 먼저 검사하고 PDF.js로 plain text만 추출하며, Service Worker는 직렬화된 계약을 다시 검증한다. 첨부 내용은 모델 instruction이 아닌 untrusted data로 경계를 분리한다.
+
+### ADR-008: 최상위 문서 관찰 우선
 
 MVP의 DOM snapshot은 활성 탭의 최상위 문서와 일반 light DOM만 관찰한다. closed/open shadow root 내부와 cross-origin iframe 내부는 수집하지 않으며, iframe은 별도 frame 권한과 명시적 사용자 동의가 필요한 후속 범위로 둔다.

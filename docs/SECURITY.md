@@ -80,7 +80,10 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - `additionalProperties: false`를 적용한다.
 - 모델이 생성한 JavaScript, selector, URL fetch, HTML을 실행하지 않는다.
 - element ID는 현재 관찰 세대에서만 유효하다.
-- password, file, hidden 필드 입력은 항상 차단한다.
+- 클릭·텍스트 입력에는 관찰 당시의 요소 이름, 역할, 입력 메타데이터, 위치를 포함한 DOM guard를 전달하고 Content Script가 실행 직전에 동기적으로 다시 비교한다.
+- 대상이 숨겨지거나 이동하거나 이름·역할·입력 메타데이터가 바뀌면 stale element로 거부한다.
+- password, file, hidden 필드와 `one-time-code`, password, 결제 카드 계열 autocomplete 입력은 항상 차단한다.
+- 모델에 전달하는 일반 페이지 텍스트는 현재 뷰포트와 교차하는 렌더링 텍스트로 제한하며 입력 요소와 `contenteditable` 초안은 제외한다.
 - 모든 클릭은 사이트 정의 부작용 가능성이 있으므로 사용자 승인을 요구한다.
 - 클릭 또는 Enter 뒤에는 같은 모델 응답의 남은 도구를 실행하지 않고 새 페이지를 재관찰한다.
 

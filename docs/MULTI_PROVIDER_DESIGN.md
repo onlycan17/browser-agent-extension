@@ -2,7 +2,7 @@
 
 ## 1. 목표
 
-Browser Agent의 기존 Local/LM Studio 및 OpenAI 연결을 유지하면서 Anthropic, OpenRouter, 기타 OpenAI-compatible LLM API를 설정 화면에서 선택·등록하고 화면 분석과 에이전트 실행에 사용할 수 있게 한다.
+Browser Agent의 기존 Local/LM Studio 및 OpenAI 연결을 유지하면서 Anthropic, OpenRouter, 기타 OpenAI-compatible LLM API를 설정 화면에서 선택·등록하고 통합 에이전트 실행에 사용할 수 있게 한다.
 
 ## 2. 지원 범위
 
@@ -43,7 +43,7 @@ ProviderClient
 └── AnthropicClient: anthropic
 ```
 
-`ProviderRouter`가 `settings.provider`에 따라 적절한 client를 선택한다. PageAnalysisService, AgentRunner, MessageHandler는 router의 공통 `testConnection()`과 `complete()`만 호출하므로 provider별 구현을 알지 않는다.
+`ProviderRouter`가 `settings.provider`에 따라 적절한 client를 선택한다. AgentRunner와 MessageHandler는 router의 공통 `testConnection()`과 `complete()`만 호출하므로 provider별 구현을 알지 않는다.
 
 ### 3.3 Anthropic translation
 
@@ -99,7 +99,7 @@ Provider를 custom에서 다른 provider로 변경하거나 custom origin을 바
 - 설정 조회 응답은 key 원문을 반환하지 않고 `hasApiKey`만 반환한다.
 - provider 또는 Custom origin이 바뀌거나 공개 설정이 손상되면 기존 key를 제거한다.
 - key, Authorization/x-api-key header, provider error body는 로그 또는 사용자 오류 메시지에 포함하지 않는다.
-- 모든 Cloud preset은 API key 필요 안내를 표시한다. 기존 저장 key가 있으면 빈 입력으로 교체하지 않는다.
+- 모든 Cloud preset은 registry의 `requiresApiKey`를 사용해 API key 필요 안내를 표시하고, 누락 시 ProviderClientRouter가 네트워크 요청 전에 명확한 오류를 반환한다. 기존 저장 key가 있으면 빈 입력으로 교체하지 않는다. Local과 Custom은 서버 정책에 따라 key 없이 사용할 수 있다.
 
 ### 3.7 Timeouts and cancellation
 
@@ -119,7 +119,7 @@ Provider를 custom에서 다른 provider로 변경하거나 custom origin을 바
 - provider별 기본 모델과 안내 문구를 registry에서 표시한다.
 - Local에는 LAN 경고, Custom에는 HTTPS와 origin 권한 안내를 표시한다.
 - 연결 검사는 모델 목록을 조회하고 선택 모델 존재 여부를 표시한다.
-- Custom 권한 거부, API key 거부, 모델 미발견을 서로 다른 메시지로 표시한다.
+- Custom 권한 거부, API key 누락·거부, 모델 미발견을 서로 다른 메시지로 표시한다.
 
 ## 5. 보안 경계
 
@@ -144,7 +144,7 @@ Provider를 custom에서 다른 provider로 변경하거나 custom origin을 바
 7. provider router: provider별 dispatch
 8. manifest: fixed hosts and optional HTTPS host declaration
 9. settings UI: provider 전환, custom editable URL, 안내와 연결 결과
-10. full regression: 화면 분석, agent tool loop, approval, Local LNA
+10. full regression: direct answer, agent tool loop, on-demand capture, approval, Local LNA
 
 ## 8. 수용 기준
 

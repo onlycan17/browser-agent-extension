@@ -88,7 +88,7 @@
 - [x] 헤더와 연결 상태
 - [x] 대화 및 실행 로그 영역
 - [x] prompt 입력과 화면 포함 옵션
-- [x] 분석, 에이전트 실행, 중지 버튼
+- [x] 통합 `보내기`와 실행 중 `중지` 버튼
 - [x] 승인 요청 카드
 - [x] 설정 drawer 또는 settings page 연결
 
@@ -156,6 +156,7 @@
 
 - [x] element ID 및 generation 검증
 - [x] visibility와 disabled 재검사
+- [x] 관찰 상태 DOM guard와 실행 직전 변경·숨김·이동 재검증
 - [x] scroll into view
 - [x] 모든 click 사용자 승인
 - [x] 클릭 결과 테스트
@@ -166,6 +167,7 @@
 - [x] password/file/hidden 차단
 - [x] native value setter 적용
 - [x] input/change 이벤트 발생
+- [x] 입력 대상 focus
 - [x] contenteditable 안전 입력
 - [x] 입력 교체/추가 모드
 - [x] React-style input fixture 테스트
@@ -174,6 +176,7 @@
 
 - [x] 허용 키 allowlist
 - [x] Enter 제출 위험 분류
+- [x] focus된 폼 입력에서 승인된 Enter의 실제 requestSubmit
 - [x] 스크롤 방향과 크기 제한
 - [x] action 결과 테스트
 
@@ -184,6 +187,7 @@
 - [x] allow/confirm/deny 결과 모델
 - [x] element 의미 기반 위험 키워드 분류
 - [x] password/payment/OTP 차단
+- [x] one-time-code/password/결제 카드 autocomplete 차단
 - [x] submit/send/purchase/delete/login 승인 요구
 - [x] 외부 navigation/download 승인 요구
 - [x] 한국어·영어 위험 레이블 테스트
@@ -229,8 +233,11 @@
 - [x] provider-bound 현재 페이지 URL origin 최소화
 - [x] navigation allowance 소진과 탭·창·origin 경계 회귀 테스트
 - [x] 동일 실패 동작 반복 방지
+- [x] Local agent reasoning token 비활성화
+- [x] 빈 assistant turn 제외와 최대 2회 bounded recovery
+- [x] 반복 빈 응답의 MODEL_PROTOCOL_ERROR terminal failure
 - [x] 재시작 시 안전 취소 정책
-- [x] 정상·실패·진행 중 취소·동적 페이지 정체·비상 한도 테스트
+- [x] 정상·실패·빈 응답 복구·진행 중 취소·동적 페이지 정체·비상 한도 테스트
 
 ### G-3. 진행 상태
 
@@ -262,12 +269,45 @@
 - [x] 현재 프레임 캡처와 시간 정보 결합
 - [x] 사용 가능한 현재 자막 텍스트 수집
 - [x] 자막 부재 시 텍스트 없는 상태 제공
+- [x] 이미 관찰된 전체 스크립트 우선 사용
+- [x] YouTube와 일반 영상 사이트의 현지화된 전체 스크립트 컨트롤 탐색 prompt
+- [x] selector 추측·반복 탐색 방지와 비대화형 분석의 조작 주장 없는 fallback
 - [ ] 제한된 구간 프레임 샘플 계획 (후속 범위)
 - [x] capture rate와 사용자 취소 적용
 
-## I. 완료 검증
+## I. 자율 화면 캡처와 첨부파일
 
-### I-1. 자동 검사
+### I-1. 설계와 데이터 계약
+
+- [x] provider-neutral 범위, 제한, 개인정보 경계 설계
+- [x] attachment strict type과 runtime validator
+- [x] 이미지·텍스트·PDF의 untrusted prompt 변환
+- [x] PDF.js worker/CMap 로컬 번들 구성
+
+### I-2. Side Panel 첨부 UX
+
+- [x] 접근 가능한 파일 선택 버튼과 native input
+- [x] 파일 chip, 제거, 크기·형식·추출 오류 표시
+- [x] 요청 중 disabled 상태와 요청 수락 후 메모리 정리
+- [x] 320px·480px 반응형 및 keyboard/screen reader 검증
+
+### I-3. Agent 자율 캡처
+
+- [x] request-scoped `allowScreenshots` 계약
+- [x] `capture_screen` tool과 run당 6회 budget
+- [x] pinned tab·rate limit·취소·timeout 적용
+- [x] capture 이후 남은 call deferred 및 fresh image 재판단
+
+### I-4. 첨부 통합
+
+- [x] page analysis attachment 전달
+- [x] agent initial message attachment 전달
+- [x] OpenAI-compatible·Anthropic·Local serializer 회귀
+- [x] text/PDF truncation 및 corrupt/password/scanned PDF 오류
+
+## J. 완료 검증
+
+### J-1. 자동 검사
 
 - [x] format check
 - [x] ESLint zero warnings
@@ -278,24 +318,63 @@
 - [x] 금지 패턴과 secret scan
 - [x] remote script 참조 부재 확인
 
-### I-2. Chrome QA
+### J-2. Chrome QA
 
-- [x] unpacked load
-- [x] 사이드 패널 extension page 로드
-- [x] 로컬 모델 API 연결 및 tool-call 응답
-- [x] Side Panel·설정 화면 Chrome Local Network Access 사용자 권한 probe
-- [ ] 실제 탭 화면 분석 수동 확인
+- [x] 현재 `dist/` unpacked load 재검증
+- [x] 현재 사이드 패널 extension page 재검증
+- [x] 현재 Local 모델 attachment/capture 및 tool-call 응답 재검증
+- [x] 현재 Side Panel·설정 화면 Chrome Local Network Access 권한 probe 재검증
+- [x] 실제 탭 화면 분석 수동 확인
 - [ ] 일반 페이지 관찰·입력·클릭·스크롤 수동 확인
-- [ ] 위험 동작 승인·거부 수동 확인
-- [ ] YouTube 상태·제어·프레임 분석 수동 확인
+- [x] 위험 동작 승인·거부 수동 확인
+- [x] YouTube 상태·제어·프레임 분석 수동 확인
 - [x] 취소와 정체·100단계·30분 안전 한도 자동 테스트
-- [x] console error 부재
-- [x] 320px, 480px 무가로스크롤 및 필수 컨트롤
+- [x] 장시간 실행 시작 확인·heartbeat·terminal event 전환 및 회귀 테스트
+- [ ] 현재 unpacked extension context의 console error 부재
+- [x] 정적 Side Panel 320px, 480px 무가로스크롤 및 필수 컨트롤
 
-### I-3. 문서 동기화
+### J-3. 문서 동기화
 
 - [x] README 설치·로드·사용법
 - [x] 권한과 개인정보 안내
 - [x] 알려진 제한 사항
 - [x] 실제 명령과 테스트 결과 반영
 - [x] 완료 항목 체크
+
+## K. 통합 적응형 에이전트
+
+### K-1. 설계와 계약
+
+- [x] 현재 화면 분석·agent 분리 흐름 조사
+- [x] 통합 UX, on-demand capture, bounded re-planning 설계
+- [x] 사용자 구현 계획 확인
+- [x] `PAGE_ANALYZE_REQUEST`와 `PageAnalysisResult` 제거
+- [x] `PageAnalysisService`와 analysis dependency 제거
+- [x] API·architecture·capture 문서의 단일 agent 계약 동기화
+
+### K-2. Side Panel 통합
+
+- [x] `화면 분석` 버튼과 analysis 전용 상태 제거
+- [x] 하나의 `보내기` submit 및 통합 busy/stop 상태
+- [x] 중립적인 시작·완료·실패 문구 적용
+- [x] agent 시작 전 Local Network Access probe 연결
+- [x] 첨부 선택·성공 후 clear·실패 후 retry 상태 보존
+
+### K-3. Agent 적응 동작
+
+- [x] 정보 요청의 tool 없는 직접 답변
+- [x] 요청 복잡도에 비례한 prompt 기반 내부 planning
+- [x] initial screenshot 제거와 on-demand `capture_screen`
+- [x] action 후 fresh DOM 재관찰 유지
+- [x] 두 번째 반복 전환에서 1회 bounded re-planning
+- [x] 계속된 정체의 기존 safety-limit 종료 유지
+- [x] approval·cancel·timeout·tab pinning·heartbeat 회귀
+
+### K-4. 검증
+
+- [x] analysis 계약·서비스 테스트 제거 및 agent 회귀로 대체
+- [x] direct answer·action·blocked re-plan·on-demand capture 테스트
+- [x] runtime start retry/dedup·Local Network Access probe 테스트
+- [x] format·lint·typecheck·전체 Vitest·build·audit
+- [x] 320px·480px 단일 action UI·keyboard·live region 정적 QA
+- [x] `docs/VERIFICATION.md` 최신 결과 기록
