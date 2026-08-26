@@ -37,6 +37,7 @@ export interface ProviderDefinition {
   timeoutMs: number;
   editableBaseUrl: boolean;
   optionalHostPermission: boolean;
+  requiresApiKey: boolean;
 }
 
 export const PROVIDERS: readonly ProviderDefinition[] = [
@@ -49,6 +50,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: LOCAL_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: false,
   },
   {
     id: "openai",
@@ -59,6 +61,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: OPENAI_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "anthropic",
@@ -69,6 +72,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "openrouter",
@@ -79,6 +83,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "groq",
@@ -89,6 +94,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "together",
@@ -99,6 +105,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "deepseek",
@@ -109,6 +116,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "mistral",
@@ -119,6 +127,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "xai",
@@ -129,6 +138,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: false,
     optionalHostPermission: false,
+    requiresApiKey: true,
   },
   {
     id: "custom",
@@ -139,6 +149,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     timeoutMs: CLOUD_PROVIDER_TIMEOUT_MS,
     editableBaseUrl: true,
     optionalHostPermission: true,
+    requiresApiKey: false,
   },
 ];
 

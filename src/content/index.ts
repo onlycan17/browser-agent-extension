@@ -19,7 +19,11 @@ function errorResponse(id: string, code: string, message: string): ContentRespon
 
 async function executeAction(request: PageActionRequest): Promise<PageActionResult> {
   if (request.type === "PAGE_CLICK") {
-    return actions.click(request.payload.generation, request.payload.elementId);
+    return actions.click(
+      request.payload.generation,
+      request.payload.elementId,
+      request.payload.expected,
+    );
   }
   if (request.type === "PAGE_TYPE_TEXT") {
     return actions.typeText(
@@ -27,6 +31,7 @@ async function executeAction(request: PageActionRequest): Promise<PageActionResu
       request.payload.elementId,
       request.payload.text,
       request.payload.replace,
+      request.payload.expected,
     );
   }
   if (request.type === "PAGE_SCROLL") {

@@ -65,9 +65,13 @@ export interface ConnectionTestResult {
   selectedModelAvailable: boolean;
 }
 
+export function appendImageContent(content: UserContent, dataUrl: string): UserContent {
+  const image: ImageContentPart = { type: "image_url", image_url: { url: dataUrl } };
+  return typeof content === "string"
+    ? [{ type: "text", text: content }, image]
+    : [...content, image];
+}
+
 export function createVisionContent(prompt: string, dataUrl: string): UserContent {
-  return [
-    { type: "text", text: prompt },
-    { type: "image_url", image_url: { url: dataUrl } },
-  ];
+  return appendImageContent(prompt, dataUrl);
 }

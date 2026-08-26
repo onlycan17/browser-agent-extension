@@ -122,7 +122,6 @@ function parseMessageResponse(value: unknown): AssistantMessage {
     if (block.type === "text" && typeof block.text === "string") text.push(block.text);
     if (block.type === "tool_use") toolCalls.push(parseToolUse(block));
   }
-  if (text.length === 0 && toolCalls.length === 0) throw protocolError();
   const message: AssistantMessage = { role: "assistant", content: text.join("\n") || null };
   return toolCalls.length === 0 ? message : { ...message, tool_calls: toolCalls };
 }

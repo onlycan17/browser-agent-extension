@@ -5,7 +5,6 @@ import { AgentToolExecutor } from "./agent-tools";
 import { ApprovalManager } from "./approval-manager";
 import { createMessageHandler } from "./message-handler";
 import { ProviderClientRouter } from "./provider-client";
-import { PageAnalysisService } from "./page-analysis-service";
 import { SafetyPolicy } from "./safety-policy";
 import { SettingsRepository } from "./settings-repository";
 import { createChromeTabAdapter, TabService } from "./tab-service";
@@ -15,7 +14,6 @@ const settingsRepository = new SettingsRepository(chrome.storage.local, chrome.s
 const providerClient = new ProviderClientRouter();
 const tabService = new TabService(createChromeTabAdapter());
 const approvalManager = new ApprovalManager();
-const analysisService = new PageAnalysisService(settingsRepository, tabService, providerClient);
 const toolExecutor = new AgentToolExecutor(
   tabService,
   new SafetyPolicy(),
@@ -33,8 +31,8 @@ const agentRunner = new AgentRunner(
 const handleMessage = createMessageHandler(
   settingsRepository,
   providerClient,
-  analysisService,
   agentRunner,
+  emitAgentEvent,
 );
 
 function reportBootstrapFailure(): void {

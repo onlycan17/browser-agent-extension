@@ -1,4 +1,5 @@
 import type { ObservedElement } from "../shared/page";
+import { isSensitiveAutocomplete } from "../shared/sensitive-input";
 
 export type SafetyDecision =
   | { outcome: "allow" }
@@ -48,6 +49,9 @@ export class SafetyPolicy {
   }
 
   private evaluateTextInput(element: ObservedElement): SafetyDecision {
+    if (isSensitiveAutocomplete(element.autocomplete)) {
+      return { outcome: "deny", reason: "Sensitive credential fields are not supported." };
+    }
     if (element.inputType !== undefined && PROTECTED_TYPES.has(element.inputType)) {
       return { outcome: "deny", reason: "This input type cannot be edited." };
     }

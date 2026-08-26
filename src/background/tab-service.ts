@@ -182,9 +182,25 @@ export class TabService {
   }
 
   private async tabForRun(runId?: string): Promise<TabContext> {
-    const active = await this.activeTab();
+    const tab = (await this.adapter.queryActive())[0];
+    if (tab?.id === undefined || tab.windowId === undefined) {
+      throw new PageAccessError("UNSUPPORTED_PAGE", "No active browser page is available.", false);
+    }
+    const pinned = runId === undefined ? undefined : this.pinnedTabs.get(runId);
+    if (
+      runId !== undefined &&
+      pinned !== undefined &&
+      (pinned.id !== tab.id || pinned.windowId !== tab.windowId)
+    ) {
+      this.navigationAllowances.delete(runId);
+      throw this.tabChangedError();
+    }
+    const active = this.tabContext({
+      id: tab.id,
+      windowId: tab.windowId,
+      ...(tab.url === undefined ? {} : { url: tab.url }),
+    });
     if (runId === undefined) return active;
-    const pinned = this.pinnedTabs.get(runId);
     if (pinned?.id !== active.id || pinned.windowId !== active.windowId) {
       this.navigationAllowances.delete(runId);
       throw this.tabChangedError();
@@ -204,6 +220,14 @@ export class TabService {
     if (tab?.id === undefined || tab.windowId === undefined) {
       throw new PageAccessError("UNSUPPORTED_PAGE", "No active browser page is available.", false);
     }
+    return this.tabContext({
+      id: tab.id,
+      windowId: tab.windowId,
+      ...(tab.url === undefined ? {} : { url: tab.url }),
+    });
+  }
+
+  private tabContext(tab: { id: number; windowId: number; url?: string }): TabContext {
     if (tab.url === undefined) {
       throw new PageAccessError(
         "TAB_ACCESS_REQUIRED",

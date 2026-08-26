@@ -1,5 +1,10 @@
 import { ALLOWED_KEYS, type PageActionRequest, type PageActionResult } from "./actions";
-import { parsePageSnapshot, type PageSnapshot } from "./page";
+import {
+  parseObservedElement,
+  parsePageSnapshot,
+  type ObservedElement,
+  type PageSnapshot,
+} from "./page";
 
 export type ContentRequest =
   | { id: string; type: "CONTENT_PING"; payload: Record<string, never> }
@@ -25,10 +30,44 @@ function parseTarget(value: unknown): { generation: number; elementId: string } 
   return { generation: Number(value.generation), elementId: value.elementId };
 }
 
-function parseTypeText(value: unknown): PageActionRequest["payload"] | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["generation", "elementId", "text", "replace"]))
+function parseGuardedTarget(
+  value: unknown,
+): { generation: number; elementId: string; expected: ObservedElement } | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["generation", "elementId", "expected"])) return null;
+  if (
+    !isRecord(value.expected) ||
+    !hasOnlyKeys(value.expected, [
+      "id",
+      "tag",
+      "role",
+      "name",
+      "disabled",
+      "bounds",
+      "inputType",
+      "autocomplete",
+      "href",
+      "download",
+    ])
+  ) {
     return null;
+  }
   const target = parseTarget({ generation: value.generation, elementId: value.elementId });
+  const expected = parseObservedElement(value.expected);
+  if (target === null || expected?.id !== target.elementId) return null;
+  return { ...target, expected };
+}
+
+function parseTypeText(value: unknown): PageActionRequest["payload"] | null {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ["generation", "elementId", "text", "replace", "expected"])
+  )
+    return null;
+  const target = parseGuardedTarget({
+    generation: value.generation,
+    elementId: value.elementId,
+    expected: value.expected,
+  });
   if (target === null || typeof value.text !== "string" || value.text.length > 4000) return null;
   if (typeof value.replace !== "boolean") return null;
   return { ...target, text: value.text, replace: value.replace };
@@ -51,7 +90,7 @@ function parseYouTubeControl(payload: unknown): PageActionRequest | null {
 
 function parseAction(type: unknown, payload: unknown): PageActionRequest | null {
   if (type === "PAGE_CLICK") {
-    const target = parseTarget(payload);
+    const target = parseGuardedTarget(payload);
     return target === null ? null : { type, payload: target };
   }
   if (type === "PAGE_TYPE_TEXT") {

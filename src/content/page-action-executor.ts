@@ -1,5 +1,8 @@
 import type { AllowedKey, PageActionResult } from "../shared/actions";
+import type { ObservedElement } from "../shared/page";
+import { isSensitiveAutocomplete } from "../shared/sensitive-input";
 import { ElementRegistry } from "./element-registry";
+import { elementMatchesObservation } from "./page-observer";
 
 export type ActionExecutionCode = "STALE_ELEMENT" | "ELEMENT_NOT_FOUND" | "UNSAFE_ACTION";
 
@@ -48,8 +51,9 @@ function dispatchInputEvents(element: HTMLElement, text: string): void {
 export class PageActionExecutor {
   constructor(private readonly registry: ElementRegistry) {}
 
-  click(generation: number, elementId: string): PageActionResult {
+  click(generation: number, elementId: string, expected: ObservedElement): PageActionResult {
     const element = this.resolve(generation, elementId);
+    this.assertUnchanged(element, expected);
     if (isDisabled(element))
       throw new ActionExecutionError("UNSAFE_ACTION", "The target is disabled.");
     if (isHidden(element)) throw new ActionExecutionError("UNSAFE_ACTION", "The target is hidden.");
@@ -63,11 +67,19 @@ export class PageActionExecutor {
     elementId: string,
     text: string,
     replace: boolean,
+    expected: ObservedElement,
   ): PageActionResult {
     const element = this.resolve(generation, elementId);
+    this.assertUnchanged(element, expected);
     if (isDisabled(element))
       throw new ActionExecutionError("UNSAFE_ACTION", "The target is disabled.");
     if (isHidden(element)) throw new ActionExecutionError("UNSAFE_ACTION", "The target is hidden.");
+    if (isSensitiveAutocomplete(element.getAttribute("autocomplete") ?? undefined)) {
+      throw new ActionExecutionError("UNSAFE_ACTION", "This input type cannot be edited.");
+    }
+    element.focus();
+    if (document.activeElement !== element)
+      throw new ActionExecutionError("UNSAFE_ACTION", "This field could not be focused safely.");
     if (element instanceof HTMLInputElement) return this.typeIntoInput(element, text, replace);
     if (element instanceof HTMLTextAreaElement)
       return this.typeIntoTextArea(element, text, replace);
@@ -82,7 +94,13 @@ export class PageActionExecutor {
   pressKey(key: AllowedKey): PageActionResult {
     const target =
       document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    if (key === "Enter" && (target === document.body || target === document.documentElement)) {
+      throw new ActionExecutionError("UNSAFE_ACTION", "No actionable element is focused.");
+    }
+    const accepted = target.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+    );
+    if (key === "Enter" && accepted) this.applyEnterDefault(target);
     target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
     return { message: `Key ${key} pressed.` };
   }
@@ -102,6 +120,27 @@ export class PageActionExecutor {
       throw new ActionExecutionError("ELEMENT_NOT_FOUND", "The target element is unavailable.");
     }
     return element;
+  }
+
+  private assertUnchanged(element: HTMLElement, expected: ObservedElement): void {
+    if (elementMatchesObservation(element, expected)) return;
+    throw new ActionExecutionError(
+      "STALE_ELEMENT",
+      "The target changed after observation; observe it again.",
+    );
+  }
+
+  private applyEnterDefault(target: HTMLElement): void {
+    if (target instanceof HTMLButtonElement) {
+      target.click();
+      return;
+    }
+    if (!(target instanceof HTMLInputElement) || target.form === null) return;
+    const submitter = target.form.querySelector<HTMLButtonElement | HTMLInputElement>(
+      "button[type='submit']:not(:disabled), input[type='submit']:not(:disabled)",
+    );
+    if (submitter === null) target.form.requestSubmit();
+    else target.form.requestSubmit(submitter);
   }
 
   private typeIntoInput(

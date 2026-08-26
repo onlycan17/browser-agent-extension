@@ -48,13 +48,25 @@ export class RuntimeRequestError extends Error {
   }
 }
 
+async function sendMessage<T extends RequestType>(request: RuntimeRequest<T>): Promise<unknown> {
+  try {
+    return await chrome.runtime.sendMessage(request);
+  } catch {
+    throw new RuntimeRequestError(
+      "RUNTIME_UNAVAILABLE",
+      "확장 프로그램과의 연결이 끊겼습니다. 확장을 다시 로드한 뒤 재시도해 주세요.",
+      true,
+    );
+  }
+}
+
 export async function sendRuntimeRequest<T extends RequestType>(
   type: T,
   payload: RequestPayloadMap[T],
 ): Promise<ResponseDataMap[T]> {
   const id = crypto.randomUUID();
   const request: RuntimeRequest<T> = { id, type, payload };
-  const rawResponse: unknown = await chrome.runtime.sendMessage(request);
+  const rawResponse = await sendMessage(request);
   const response = parseResponse<ResponseDataMap[T]>(rawResponse, id);
   if (!response.ok) {
     throw new RuntimeRequestError(

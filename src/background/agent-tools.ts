@@ -73,7 +73,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "youtube_control",
-      description: "Control the YouTube player on the current page.",
+      description:
+        "Use this tool for YouTube play, pause, seek, playback rate, and volume changes. For a combined request, make one call for each requested state change. Do not click visible player controls for operations supported by this tool.",
       parameters: {
         type: "object",
         properties: {
@@ -89,6 +90,20 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     },
   },
 ];
+
+const CAPTURE_SCREEN_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "capture_screen",
+    description:
+      "Capture the currently visible viewport when visual information is necessary. The user must enable screenshot access for this run.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+};
+
+export function agentTools(allowScreenshots: boolean): ToolDefinition[] {
+  return allowScreenshots ? [...AGENT_TOOLS, CAPTURE_SCREEN_TOOL] : AGENT_TOOLS;
+}
 
 type ParsedTool =
   | { name: "click_element"; generation: number; elementId: string }
@@ -159,6 +174,16 @@ function parseYouTubeTool(value: Record<string, unknown>): ParsedTool | null {
     : null;
 }
 
+export function isCaptureScreenCall(call: ToolCall): boolean {
+  if (call.function.name !== "capture_screen") return false;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    return isRecord(value) && hasOnlyKeys(value, []);
+  } catch {
+    return false;
+  }
+}
+
 function parseTool(call: ToolCall): ParsedTool | null {
   let value: unknown;
   try {
@@ -200,16 +225,21 @@ function actionProposal(tool: ParsedTool, snapshot: PageSnapshot): ActionProposa
     : { action: "type_text", element };
 }
 
-function pageAction(tool: ParsedTool): PageActionRequest {
+function pageAction(tool: ParsedTool, element: ObservedElement | null): PageActionRequest {
   if (tool.name === "click_element") {
+    if (element === null) throw new Error("Observed element is required.");
     return {
       type: "PAGE_CLICK",
-      payload: { generation: tool.generation, elementId: tool.elementId },
+      payload: { generation: tool.generation, elementId: tool.elementId, expected: element },
     };
   }
   if (tool.name === "type_text") {
+    if (element === null) throw new Error("Observed element is required.");
     const { generation, elementId, text, replace } = tool;
-    return { type: "PAGE_TYPE_TEXT", payload: { generation, elementId, text, replace } };
+    return {
+      type: "PAGE_TYPE_TEXT",
+      payload: { generation, elementId, text, replace, expected: element },
+    };
   }
   if (tool.name === "press_key") return { type: "PAGE_PRESS_KEY", payload: { key: tool.key } };
   if (tool.name === "youtube_control") {
@@ -235,6 +265,7 @@ function signature(tool: ParsedTool): string {
 }
 
 export function toolCallSignature(call: ToolCall): string {
+  if (isCaptureScreenCall(call)) return "capture_screen";
   const tool = parseTool(call);
   return tool === null ? `invalid:${call.function.name}` : signature(tool);
 }
@@ -248,6 +279,7 @@ function textFingerprint(value: string): string {
 }
 
 export function toolCallProgressSignature(call: ToolCall): string {
+  if (isCaptureScreenCall(call)) return "capture_screen";
   const tool = parseTool(call);
   if (tool === null)
     return `invalid:${call.function.name}:${textFingerprint(call.function.arguments)}`;
@@ -304,7 +336,8 @@ export class AgentToolExecutor {
     }
     signal.throwIfAborted();
     try {
-      const result = await this.actions.executeAction(pageAction(tool), runId, signal);
+      const element = "element" in proposal ? proposal.element : null;
+      const result = await this.actions.executeAction(pageAction(tool, element), runId, signal);
       signal.throwIfAborted();
       return {
         message: toolMessage(call.id, { ok: true, message: result.message }),

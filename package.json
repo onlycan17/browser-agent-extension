@@ -11,12 +11,14 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=80 --coverage.thresholds.functions=80 --coverage.thresholds.statements=80 --coverage.thresholds.branches=70",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/chrome": "0.2.7",
     "@types/node": "26.3.0",
+    "@vitest/coverage-v8": "4.1.11",
     "esbuild": "0.28.2",
     "eslint": "10.9.1",
     "globals": "17.11.0",
@@ -27,6 +29,10 @@
     "vitest": "4.1.11"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "fsevents": false
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.2.108"
   }
 }

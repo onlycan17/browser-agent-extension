@@ -13,6 +13,7 @@ export interface ObservedElement {
   disabled: boolean;
   bounds: ElementBounds;
   inputType?: string;
+  autocomplete?: string;
   href?: string;
   download?: boolean;
 }
@@ -44,13 +45,6 @@ export interface PageSnapshot {
   youtube?: YouTubeState;
 }
 
-export interface PageAnalysisResult {
-  answer: string;
-  url: string;
-  title: string;
-  screenshotUsed: boolean;
-}
-
 export function providerSafePageUrl(value: string): string {
   try {
     const url = new URL(value);
@@ -79,13 +73,14 @@ function parseBounds(value: unknown): ElementBounds | null {
   return { x: Number(x), y: Number(y), width: Number(width), height: Number(height) };
 }
 
-function parseElement(value: unknown): ObservedElement | null {
+export function parseObservedElement(value: unknown): ObservedElement | null {
   if (!isRecord(value)) return null;
   const { id, tag, role, name, disabled } = value;
   const bounds = parseBounds(value.bounds);
   if (![id, tag, role, name].every((item) => typeof item === "string")) return null;
   if (typeof disabled !== "boolean" || bounds === null) return null;
   if (value.inputType !== undefined && typeof value.inputType !== "string") return null;
+  if (value.autocomplete !== undefined && typeof value.autocomplete !== "string") return null;
   if (value.href !== undefined && typeof value.href !== "string") return null;
   if (value.download !== undefined && typeof value.download !== "boolean") return null;
   const base = {
@@ -99,6 +94,7 @@ function parseElement(value: unknown): ObservedElement | null {
   return {
     ...base,
     ...(typeof value.inputType === "string" ? { inputType: value.inputType } : {}),
+    ...(typeof value.autocomplete === "string" ? { autocomplete: value.autocomplete } : {}),
     ...(typeof value.href === "string" ? { href: value.href } : {}),
     ...(typeof value.download === "boolean" ? { download: value.download } : {}),
   };
@@ -136,7 +132,7 @@ function parseViewport(value: unknown): PageViewport | null {
 export function parsePageSnapshot(value: unknown): PageSnapshot | null {
   if (!isRecord(value) || !Array.isArray(value.elements)) return null;
   const viewport = parseViewport(value.viewport);
-  const elements = value.elements.map(parseElement);
+  const elements = value.elements.map(parseObservedElement);
   if (viewport === null || elements.some((element) => element === null)) return null;
   if (!Number.isInteger(value.generation) || Number(value.generation) < 1) return null;
   if (typeof value.url !== "string" || typeof value.title !== "string") return null;

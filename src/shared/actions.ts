@@ -1,3 +1,5 @@
+import type { ObservedElement } from "./page";
+
 export const ALLOWED_KEYS = [
   "Enter",
   "Escape",
@@ -11,10 +13,19 @@ export const ALLOWED_KEYS = [
 export type AllowedKey = (typeof ALLOWED_KEYS)[number];
 
 export type PageActionRequest =
-  | { type: "PAGE_CLICK"; payload: { generation: number; elementId: string } }
+  | {
+      type: "PAGE_CLICK";
+      payload: { generation: number; elementId: string; expected: ObservedElement };
+    }
   | {
       type: "PAGE_TYPE_TEXT";
-      payload: { generation: number; elementId: string; text: string; replace: boolean };
+      payload: {
+        generation: number;
+        elementId: string;
+        text: string;
+        replace: boolean;
+        expected: ObservedElement;
+      };
     }
   | {
       type: "PAGE_SCROLL";

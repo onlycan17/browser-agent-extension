@@ -1,4 +1,10 @@
-import { parseAgentEvent, type AgentApprovalEvent, type AgentEvent } from "../shared/agent";
+import {
+  parseAgentEvent,
+  type AgentApprovalEvent,
+  type AgentEvent,
+  type AgentFailedEvent,
+  type AgentFinishedEvent,
+} from "../shared/agent";
 import {
   LocalNetworkAccessError,
   runProviderRequest,
@@ -6,6 +12,11 @@ import {
 } from "../shared/provider-connection";
 import { RuntimeRequestError, sendRuntimeRequest } from "../shared/runtime-client";
 import type { SettingsSummary } from "../shared/settings";
+import { startAgentKeepAlive } from "./agent-keepalive";
+import { startAgentWithRecovery } from "./agent-start";
+import { AttachmentReadError, readSelectedAttachments } from "./attachment-reader";
+import { AttachmentState, AttachmentStateError } from "./attachment-state";
+import { renderAttachmentList, setAttachmentHelp } from "./attachment-view";
 import { APPROVE_RUN_LABEL, approvalPresentation } from "./approval-presentation";
 import {
   appendChatMessage,
@@ -21,7 +32,10 @@ interface PanelElements {
   form: HTMLFormElement;
   prompt: HTMLTextAreaElement;
   includeScreenshot: HTMLInputElement;
-  analyzeButton: HTMLButtonElement;
+  attachmentInput: HTMLInputElement;
+  attachmentButton: HTMLLabelElement;
+  attachmentHelp: HTMLParagraphElement;
+  attachmentList: HTMLUListElement;
   runButton: HTMLButtonElement;
   stopButton: HTMLButtonElement;
   settingsButton: HTMLButtonElement;
@@ -36,7 +50,10 @@ interface PanelElements {
 }
 
 const runState = new PanelRunState();
+const attachmentState = new AttachmentState();
+const ATTACHMENT_HELP = "이미지 · 텍스트 · PDF / 최대 5개";
 let activeAgentMessage: HTMLLIElement | null = null;
+let stopAgentKeepAlive: (() => void) | null = null;
 
 type ElementConstructor<T extends Element> = new () => T;
 
@@ -52,7 +69,10 @@ function collectElements(): PanelElements {
     form: getElement("#prompt-form", HTMLFormElement),
     prompt: getElement("#prompt-input", HTMLTextAreaElement),
     includeScreenshot: getElement("#include-screenshot", HTMLInputElement),
-    analyzeButton: getElement("#analyze-button", HTMLButtonElement),
+    attachmentInput: getElement("#attachment-input", HTMLInputElement),
+    attachmentButton: getElement("#attachment-button", HTMLLabelElement),
+    attachmentHelp: getElement("#attachment-help", HTMLParagraphElement),
+    attachmentList: getElement("#attachment-list", HTMLUListElement),
     runButton: getElement("#run-button", HTMLButtonElement),
     stopButton: getElement("#stop-button", HTMLButtonElement),
     settingsButton: getElement("#settings-button", HTMLButtonElement),
@@ -108,13 +128,22 @@ function addSystemMessage(
   appendChatMessage(elements.conversationLog, { role: "system", title, body, state });
 }
 
+function userMessageBody(prompt: string): string {
+  const names = attachmentState.snapshot().map((attachment) => attachment.name);
+  return names.length === 0 ? prompt : `${prompt}\n\n첨부파일: ${names.join(", ")}`;
+}
+
 function startConversationTurn(
   elements: PanelElements,
   prompt: string,
   title: string,
   body: string,
 ): HTMLLIElement {
-  appendChatMessage(elements.conversationLog, { role: "user", body: prompt, state: "idle" });
+  appendChatMessage(elements.conversationLog, {
+    role: "user",
+    body: userMessageBody(prompt),
+    state: "idle",
+  });
   const response = appendChatMessage(
     elements.conversationLog,
     {
@@ -150,93 +179,112 @@ function requirePrompt(elements: PanelElements): string | null {
   return null;
 }
 
-function setAnalyzing(elements: PanelElements, analyzing: boolean): void {
-  elements.analyzeButton.disabled = analyzing;
-  elements.runButton.disabled = analyzing;
-  elements.prompt.readOnly = analyzing;
-}
-
-async function analyzePage(elements: PanelElements): Promise<void> {
-  const prompt = requirePrompt(elements);
-  if (prompt === null) return;
-  setAnalyzing(elements, true);
-  const response = startConversationTurn(
-    elements,
-    prompt,
-    "화면을 살펴보고 있어요",
-    "페이지 구조를 읽고 요청 내용을 분석합니다.",
-  );
-  try {
-    const settings = await sendRuntimeRequest("SETTINGS_GET", {});
-    const result = await runProviderRequest(settings, () =>
-      sendRuntimeRequest("PAGE_ANALYZE_REQUEST", {
-        prompt,
-        includeScreenshot: elements.includeScreenshot.checked,
-      }),
-    );
-    finishConversationTurn(elements, response, result.title, result.answer, "complete");
-  } catch (error: unknown) {
-    finishConversationTurn(
-      elements,
-      response,
-      "화면 분석에 실패했어요",
-      formatError(error),
-      "error",
-    );
-  } finally {
-    setAnalyzing(elements, false);
+function setAttachmentControlsDisabled(elements: PanelElements, disabled: boolean): void {
+  elements.attachmentInput.disabled = disabled;
+  elements.attachmentButton.setAttribute("aria-disabled", String(disabled));
+  for (const button of elements.attachmentList.querySelectorAll<HTMLButtonElement>("button")) {
+    button.disabled = disabled;
   }
 }
 
+function setComposerBusy(elements: PanelElements, busy: boolean): void {
+  elements.runButton.disabled = busy;
+  elements.includeScreenshot.disabled = busy;
+  elements.prompt.readOnly = busy;
+  setAttachmentControlsDisabled(elements, busy);
+}
+
 function setRunning(elements: PanelElements, running: boolean): void {
-  elements.runButton.disabled = running;
-  elements.analyzeButton.disabled = running;
+  setComposerBusy(elements, running);
   elements.stopButton.disabled = !running;
-  elements.prompt.readOnly = running;
+  elements.stopButton.hidden = !running;
 }
 
 function resultPresentation(
   status: "cancelled" | "completed" | "safety_limit",
 ): [string, ChatState] {
-  if (status === "completed") return ["작업을 완료했어요", "complete"];
+  if (status === "completed") return ["응답을 완료했어요", "complete"];
   if (status === "cancelled") return ["작업을 중지했어요", "cancelled"];
   return ["안전 한도에서 중지했어요", "cancelled"];
+}
+
+function closeAgentSession(elements: PanelElements, runId: string): void {
+  if (!runState.finish(runId)) return;
+  stopAgentKeepAlive?.();
+  stopAgentKeepAlive = null;
+  activeAgentMessage = null;
+  clearApproval(elements);
+  setRunning(elements, false);
+}
+
+function failAgentSession(elements: PanelElements, runId: string, error: unknown): void {
+  if (!runState.matches(runId) || activeAgentMessage === null) return;
+  finishConversationTurn(
+    elements,
+    activeAgentMessage,
+    "요청을 완료하지 못했어요",
+    formatError(error),
+    "error",
+  );
+  closeAgentSession(elements, runId);
+}
+
+function keepAgentAlive(elements: PanelElements, runId: string): void {
+  stopAgentKeepAlive?.();
+  stopAgentKeepAlive = startAgentKeepAlive(
+    runId,
+    async (activeRunId) => {
+      const result = await sendRuntimeRequest("AGENT_KEEPALIVE", { runId: activeRunId });
+      if (result.state === "terminal") {
+        handleAgentEvent(elements, result.event);
+        return;
+      }
+      if (result.state === "missing") {
+        throw new RuntimeRequestError(
+          "AGENT_RUN_LOST",
+          "확장 프로그램이 작업 실행 상태를 잃었습니다. 작업을 다시 시작해 주세요.",
+          true,
+        );
+      }
+    },
+    (error) => {
+      failAgentSession(elements, runId, error);
+    },
+  );
 }
 
 async function runAgent(elements: PanelElements): Promise<void> {
   const instruction = requirePrompt(elements);
   if (instruction === null) return;
+  const attachments = attachmentState.snapshot();
   setRunning(elements, true);
   const runId = crypto.randomUUID();
   runState.begin(runId);
   activeAgentMessage = startConversationTurn(
     elements,
     instruction,
-    "작업을 시작했어요",
-    "현재 페이지를 관찰하고 다음 동작을 판단합니다.",
+    "요청을 이해하고 있어요",
+    "현재 페이지와 첨부를 살펴보고 필요한 계획을 세웁니다.",
   );
   try {
-    const result = await sendRuntimeRequest("AGENT_RUN_REQUEST", {
+    const payload = {
       runId,
       instruction,
-      includeScreenshot: elements.includeScreenshot.checked,
-    });
-    const [title, state] = resultPresentation(result.status);
-    finishConversationTurn(elements, activeAgentMessage, title, result.answer, state);
-  } catch (error: unknown) {
-    finishConversationTurn(
-      elements,
-      activeAgentMessage,
-      "작업을 완료하지 못했어요",
-      formatError(error),
-      "error",
+      allowScreenshots: elements.includeScreenshot.checked,
+      attachments,
+    };
+    const settings = await sendRuntimeRequest("SETTINGS_GET", {});
+    const result = await runProviderRequest(settings, () =>
+      startAgentWithRecovery(payload, (value) => sendRuntimeRequest("AGENT_RUN_REQUEST", value)),
     );
-  } finally {
-    if (runState.finish(runId)) {
-      activeAgentMessage = null;
-      clearApproval(elements);
-      setRunning(elements, false);
+    if (!runState.matches(runId)) return;
+    if (!result.started || result.runId !== runId) {
+      throw new RuntimeRequestError("INVALID_RESPONSE", "Agent start was not acknowledged.", true);
     }
+    clearAttachments(elements);
+    keepAgentAlive(elements, runId);
+  } catch (error: unknown) {
+    failAgentSession(elements, runId, error);
   }
 }
 
@@ -328,6 +376,26 @@ function updateProgress(
   updateChatMessage(message, { role: "assistant", title, body, state });
 }
 
+function handleTerminalEvent(
+  elements: PanelElements,
+  event: AgentFinishedEvent | AgentFailedEvent,
+): void {
+  if (activeAgentMessage === null) return;
+  if (event.type === "AGENT_FINISHED") {
+    const [title, state] = resultPresentation(event.payload.status);
+    finishConversationTurn(elements, activeAgentMessage, title, event.payload.answer, state);
+  } else {
+    finishConversationTurn(
+      elements,
+      activeAgentMessage,
+      "작업을 완료하지 못했어요",
+      event.payload.error.message,
+      "error",
+    );
+  }
+  closeAgentSession(elements, event.payload.runId);
+}
+
 function handleAgentEvent(elements: PanelElements, event: AgentEvent): void {
   if (!runState.matches(event.payload.runId) || activeAgentMessage === null) return;
   if (event.type === "AGENT_PROGRESS") {
@@ -341,7 +409,7 @@ function handleAgentEvent(elements: PanelElements, event: AgentEvent): void {
     setLiveStatus(elements, "사용자 승인이 필요한 동작입니다.");
     return;
   }
-  clearApproval(elements);
+  handleTerminalEvent(elements, event);
 }
 
 function formatError(error: unknown): string {
@@ -376,10 +444,52 @@ async function testConnection(elements: PanelElements): Promise<void> {
   }
 }
 
+function renderAttachments(elements: PanelElements): void {
+  renderAttachmentList(elements.attachmentList, attachmentState.snapshot(), (index, attachment) => {
+    attachmentState.remove(index);
+    renderAttachments(elements);
+    setLiveStatus(elements, `${attachment.name} 첨부파일을 제거했습니다.`);
+  });
+}
+
+function clearAttachments(elements: PanelElements): void {
+  attachmentState.clear();
+  elements.attachmentInput.value = "";
+  setAttachmentHelp(elements.attachmentHelp, ATTACHMENT_HELP);
+  renderAttachments(elements);
+}
+
+function attachmentErrorMessage(error: unknown): string {
+  if (error instanceof AttachmentReadError || error instanceof AttachmentStateError) {
+    return error.message;
+  }
+  return "첨부파일을 읽지 못했습니다.";
+}
+
+async function selectAttachments(elements: PanelElements): Promise<void> {
+  const files = Array.from(elements.attachmentInput.files ?? []);
+  elements.attachmentInput.value = "";
+  if (files.length === 0) return;
+  setComposerBusy(elements, true);
+  setAttachmentHelp(elements.attachmentHelp, "파일을 안전하게 읽고 있어요…", "loading");
+  try {
+    attachmentState.add(await readSelectedAttachments(files));
+    renderAttachments(elements);
+    setAttachmentHelp(elements.attachmentHelp, ATTACHMENT_HELP);
+    setLiveStatus(elements, `${String(files.length)}개 첨부파일을 준비했습니다.`);
+  } catch (error: unknown) {
+    const message = attachmentErrorMessage(error);
+    setAttachmentHelp(elements.attachmentHelp, message, "error");
+    setLiveStatus(elements, message);
+  } finally {
+    setComposerBusy(elements, false);
+  }
+}
+
 function registerEvents(elements: PanelElements): void {
   elements.settingsButton.addEventListener("click", () => void chrome.runtime.openOptionsPage());
   elements.connectionButton.addEventListener("click", () => void testConnection(elements));
-  elements.analyzeButton.addEventListener("click", () => void analyzePage(elements));
+  elements.attachmentInput.addEventListener("change", () => void selectAttachments(elements));
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
     void runAgent(elements);

@@ -22,10 +22,14 @@ function parseToolCall(value: unknown): ToolCall | null {
 
 function parseAssistantMessage(value: unknown): AssistantMessage {
   if (!isRecord(value) || value.role !== "assistant") throw protocolError();
-  const content =
-    typeof value.content === "string" || value.content === null ? value.content : null;
+  const rawContent = value.content;
+  if (rawContent !== undefined && typeof rawContent !== "string" && rawContent !== null) {
+    throw protocolError();
+  }
+  const hasContent = rawContent !== undefined;
+  const content = rawContent ?? null;
   if (value.tool_calls === undefined) {
-    if (content === null) throw protocolError();
+    if (!hasContent) throw protocolError();
     return { role: "assistant", content };
   }
   if (!isUnknownArray(value.tool_calls)) throw protocolError();

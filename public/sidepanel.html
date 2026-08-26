@@ -72,22 +72,39 @@
           placeholder="현재 페이지에서 무엇을 할까요?"
           required
         ></textarea>
+        <div class="attachment-control">
+          <label id="attachment-button" class="attachment-button" for="attachment-input">
+            <span class="attachment-button__mark" aria-hidden="true">+</span>
+            파일 첨부
+          </label>
+          <input
+            id="attachment-input"
+            class="sr-only"
+            type="file"
+            multiple
+            accept=".png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv,.json,.html,.htm,.xml,.pdf"
+            aria-describedby="attachment-help"
+          />
+          <p id="attachment-help" class="attachment-help">이미지 · 텍스트 · PDF / 최대 5개</p>
+        </div>
+        <ul
+          id="attachment-list"
+          class="attachment-list"
+          aria-label="선택한 첨부파일"
+          aria-live="polite"
+          hidden
+        ></ul>
         <div class="command-options">
           <label class="toggle-row" for="include-screenshot">
             <input id="include-screenshot" type="checkbox" />
             <span class="toggle" aria-hidden="true"></span>
-            화면 캡처 포함
+            화면 캡처 허용
           </label>
-          <span class="privacy-note">요청 시에만 캡처</span>
+          <span class="privacy-note">이 요청에서만 · 필요할 때</span>
         </div>
         <div class="command-actions">
-          <button id="analyze-button" class="button button--secondary" type="button">
-            화면 분석
-          </button>
-          <button id="run-button" class="button button--primary" type="submit">
-            메시지 보내기
-          </button>
-          <button id="stop-button" class="button button--danger" type="button" disabled>
+          <button id="run-button" class="button button--primary" type="submit">보내기</button>
+          <button id="stop-button" class="button button--danger" type="button" disabled hidden>
             중지
           </button>
         </div>
