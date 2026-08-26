@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentApprovalEvent, AgentEvent } from "../src/shared/agent";
 import type { ToolCall } from "../src/shared/llm";
 import type { PageSnapshot } from "../src/shared/page";
-import { AgentToolExecutor } from "../src/background/agent-tools";
+import { AGENT_TOOLS, AgentToolExecutor } from "../src/background/agent-tools";
 import { ApprovalManager } from "../src/background/approval-manager";
 import { SafetyPolicy } from "../src/background/safety-policy";
 
@@ -69,6 +69,19 @@ describe("AgentToolExecutor run approval", () => {
 
     expect(events.filter((event) => event.type === "AGENT_APPROVAL_REQUIRED")).toHaveLength(1);
     expect(executeAction).toHaveBeenCalledTimes(2);
+    expect(executeAction).toHaveBeenNthCalledWith(
+      1,
+      {
+        type: "PAGE_CLICK",
+        payload: {
+          generation: 1,
+          elementId: "submit",
+          expected: snapshot.elements[0],
+        },
+      },
+      "run-1",
+      signal,
+    );
   });
 
   it("keeps deny rules active after the run is approved", async () => {
@@ -99,5 +112,16 @@ describe("AgentToolExecutor run approval", () => {
     expect(denied.failed).toBe(true);
     expect(denied.message.content).toContain("Sensitive credential");
     expect(executeAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("YouTube control tool guidance", () => {
+  it("directs every requested player state change to a dedicated tool call", () => {
+    const description = AGENT_TOOLS.find((tool) => tool.function.name === "youtube_control")
+      ?.function.description;
+
+    expect(description).toContain("pause, seek, playback rate, and volume");
+    expect(description).toContain("one call for each requested state change");
+    expect(description).toContain("Do not click visible player controls");
   });
 });

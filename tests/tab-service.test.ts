@@ -18,6 +18,15 @@ function pageSnapshot(url = "https://example.com/") {
   };
 }
 
+const expectedTarget = {
+  id: "e-1",
+  tag: "button",
+  role: "button",
+  name: "Continue",
+  disabled: false,
+  bounds: { x: 10, y: 10, width: 100, height: 30 },
+};
+
 function createAdapter(overrides: Partial<BrowserTabAdapter> = {}): BrowserTabAdapter {
   return {
     queryActive: () => Promise.resolve([{ id: 4, windowId: 2, url: "https://example.com/" }]),
@@ -143,6 +152,25 @@ describe("TabService", () => {
     );
   });
 
+  it("reports a tab change before requesting access to the newly active tab", async () => {
+    let activeTabId = 4;
+    const adapter = createAdapter({
+      queryActive: () =>
+        Promise.resolve(
+          activeTabId === 4
+            ? [{ id: 4, windowId: 2, url: "https://example.com/" }]
+            : [{ id: 5, windowId: 2 }],
+        ),
+    });
+    const service = new TabService(adapter);
+    await service.pinActivePage("run-1");
+    activeTabId = 5;
+
+    await expect(service.observeActivePage("run-1")).rejects.toEqual(
+      new PageAccessError("TAB_CHANGED", "The active tab changed during the agent run.", false),
+    );
+  });
+
   it("rejects an agent action after same-tab navigation", async () => {
     let activeUrl = "https://example.com/start";
     const adapter = createAdapter({
@@ -162,7 +190,7 @@ describe("TabService", () => {
       label: "approved click",
       action: {
         type: "PAGE_CLICK",
-        payload: { generation: 1, elementId: "e-1" },
+        payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
       },
     },
     {
@@ -223,7 +251,10 @@ describe("TabService", () => {
 
     await expect(
       service.executeAction(
-        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        {
+          type: "PAGE_CLICK",
+          payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+        },
         "run-1",
       ),
     ).rejects.toThrow("The source document unloaded.");
@@ -253,7 +284,10 @@ describe("TabService", () => {
     const service = new TabService(adapter);
     await service.pinActivePage("run-1");
     await service.executeAction(
-      { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+      {
+        type: "PAGE_CLICK",
+        payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+      },
       "run-1",
     );
     activeUrl = "https://example.com/results";
@@ -284,7 +318,10 @@ describe("TabService", () => {
 
     await expect(
       service.executeAction(
-        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        {
+          type: "PAGE_CLICK",
+          payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+        },
         "run-1",
       ),
     ).rejects.toMatchObject({ code: "TAB_CHANGED" });
@@ -310,7 +347,10 @@ describe("TabService", () => {
 
     await expect(
       service.executeAction(
-        { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+        {
+          type: "PAGE_CLICK",
+          payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+        },
         "run-1",
       ),
     ).rejects.toMatchObject({ code: "TAB_CHANGED" });
@@ -336,7 +376,10 @@ describe("TabService", () => {
     const service = new TabService(adapter);
     await service.pinActivePage("run-1");
     await service.executeAction(
-      { type: "PAGE_CLICK", payload: { generation: 1, elementId: "e-1" } },
+      {
+        type: "PAGE_CLICK",
+        payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+      },
       "run-1",
     );
     await service.observeActivePage("run-1");

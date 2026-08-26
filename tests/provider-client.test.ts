@@ -18,6 +18,7 @@ const anthropicSettings = {
   baseUrl: ANTHROPIC_BASE_URL,
   model: "claude-sonnet-4-5",
   rememberApiKey: false,
+  apiKey: "anthropic-test-key",
 };
 
 const openRouterSettings = {
@@ -25,9 +26,29 @@ const openRouterSettings = {
   baseUrl: OPENROUTER_BASE_URL,
   model: "anthropic/claude-sonnet-4.5",
   rememberApiKey: false,
+  apiKey: "openrouter-test-key",
 };
 
 describe("ProviderClientRouter", () => {
+  it("rejects a cloud provider without an API key before making a request", async () => {
+    const openAICompatible = mockClient();
+    const anthropic = mockClient();
+    const router = new ProviderClientRouter(openAICompatible, anthropic);
+    const settingsWithoutKey = {
+      provider: openRouterSettings.provider,
+      baseUrl: openRouterSettings.baseUrl,
+      model: openRouterSettings.model,
+      rememberApiKey: openRouterSettings.rememberApiKey,
+    };
+
+    await expect(router.testConnection(settingsWithoutKey)).rejects.toMatchObject({
+      code: "PROVIDER_REJECTED",
+      message: "OpenRouter API key is required.",
+      retryable: false,
+    });
+    expect(openAICompatible.testConnection).not.toHaveBeenCalled();
+  });
+
   it("routes native Anthropic requests to the Anthropic client", async () => {
     const openAICompatible = mockClient();
     const anthropic = mockClient();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ElementRegistry } from "../src/content/element-registry";
 import { PageObserver } from "../src/content/page-observer";
 
@@ -42,6 +42,22 @@ describe("PageObserver", () => {
     expect(registry.resolve(first.generation, first.elements[0]?.id ?? "")).toBeNull();
   });
 
+  it("exposes localized video transcript controls on non-YouTube pages", () => {
+    const more = appendVisible(document.createElement("button"));
+    more.textContent = "더보기";
+    const transcript = appendVisible(document.createElement("button"));
+    transcript.setAttribute("aria-label", "스크립트");
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "button", name: "더보기" }),
+        expect.objectContaining({ role: "button", name: "스크립트" }),
+      ]),
+    );
+  });
+
   it("exposes only link origins to avoid leaking URL tokens", () => {
     const link = appendVisible(document.createElement("a"));
     link.href = "https://download.example/magic/secret?token=private#fragment";
@@ -73,6 +89,97 @@ describe("PageObserver", () => {
     expect(snapshot.elements.find((item) => item.name === "Query")).not.toHaveProperty("value");
     expect(JSON.stringify(snapshot)).not.toContain("super-secret");
     expect(JSON.stringify(snapshot)).not.toContain("safe value");
+  });
+
+  it("exposes autocomplete metadata without exposing the input value", () => {
+    const code = appendVisible(document.createElement("input"));
+    code.type = "text";
+    code.autocomplete = "one-time-code";
+    code.value = "654321";
+    code.setAttribute("aria-label", "Code");
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements[0]).toMatchObject({
+      name: "Code",
+      inputType: "text",
+      autocomplete: "one-time-code",
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("654321");
+  });
+
+  it("exposes sensitive autocomplete metadata on non-input editable fields", () => {
+    const code = appendVisible(document.createElement("textarea"));
+    code.setAttribute("autocomplete", "one-time-code");
+    code.setAttribute("aria-label", "Code");
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements[0]).toMatchObject({
+      name: "Code",
+      autocomplete: "one-time-code",
+    });
+  });
+
+  it("limits visible text to the viewport and excludes editable drafts", () => {
+    const visible = appendVisible(document.createElement("p"));
+    visible.textContent = "PUBLIC-VISIBLE-TEXT";
+    const draft = appendVisible(document.createElement("div"));
+    draft.setAttribute("contenteditable", "true");
+    draft.textContent = "PRIVATE-EDITABLE-DRAFT";
+    const offscreen = document.createElement("p");
+    offscreen.textContent = "PRIVATE-OFFSCREEN-TEXT";
+    offscreen.getBoundingClientRect = () => ({
+      x: 10,
+      y: 2000,
+      width: 120,
+      height: 32,
+      top: 2000,
+      right: 130,
+      bottom: 2032,
+      left: 10,
+      toJSON: () => ({}),
+    });
+    document.body.append(offscreen);
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.visibleText).toContain("PUBLIC-VISIBLE-TEXT");
+    expect(snapshot.visibleText).not.toContain("PRIVATE-EDITABLE-DRAFT");
+    expect(snapshot.visibleText).not.toContain("PRIVATE-OFFSCREEN-TEXT");
+    expect(JSON.stringify(snapshot)).not.toContain("PRIVATE-EDITABLE-DRAFT");
+    expect(JSON.stringify(snapshot)).not.toContain("PRIVATE-OFFSCREEN-TEXT");
+  });
+
+  it("includes only visible words from a text node that crosses the viewport", () => {
+    const paragraph = appendVisible(document.createElement("p"));
+    paragraph.textContent = "VISIBLE-WORD OFFSCREEN-WORD";
+    vi.spyOn(document, "createRange").mockImplementation(() => {
+      let startOffset = 0;
+      return {
+        selectNodeContents: () => undefined,
+        setStart: (_node: Node, offset: number) => {
+          startOffset = offset;
+        },
+        setEnd: () => undefined,
+        getBoundingClientRect: () => ({
+          x: 10,
+          y: startOffset === 0 ? 12 : 2000,
+          width: 100,
+          height: 20,
+          top: startOffset === 0 ? 12 : 2000,
+          right: 110,
+          bottom: startOffset === 0 ? 32 : 2020,
+          left: 10,
+          toJSON: () => ({}),
+        }),
+      } as unknown as Range;
+    });
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.visibleText).toContain("VISIBLE-WORD");
+    expect(snapshot.visibleText).not.toContain("OFFSCREEN-WORD");
   });
 
   it("ignores elements outside the viewport", () => {

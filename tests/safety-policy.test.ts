@@ -26,6 +26,31 @@ describe("SafetyPolicy", () => {
     },
   );
 
+  it.each(["one-time-code", "current-password", "new-password", "cc-number", "cc-csc"])(
+    "denies sensitive autocomplete metadata %s even with a neutral label",
+    (autocomplete) => {
+      expect(
+        policy.evaluate({
+          action: "type_text",
+          element: element({ name: "Code", inputType: "text", autocomplete }),
+        }),
+      ).toMatchObject({ outcome: "deny" });
+    },
+  );
+
+  it("denies a section-scoped one-time-code autocomplete value", () => {
+    expect(
+      policy.evaluate({
+        action: "type_text",
+        element: element({
+          name: "Code",
+          inputType: "text",
+          autocomplete: "section-checkout one-time-code webauthn",
+        }),
+      }),
+    ).toMatchObject({ outcome: "deny" });
+  });
+
   it.each(["Send message", "Buy now", "Delete account", "로그인", "결제하기"])(
     "requires confirmation for %s",
     (name) => {

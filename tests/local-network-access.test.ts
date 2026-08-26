@@ -65,7 +65,7 @@ describe("local provider connection", () => {
     expect(result.selectedModelAvailable).toBe(true);
   });
 
-  it("runs an analysis request after the document probe", async () => {
+  it("runs an agent request after the document probe", async () => {
     const events: string[] = [];
 
     const result = await runProviderRequest(
@@ -84,7 +84,7 @@ describe("local provider connection", () => {
     expect(result).toEqual({ answer: "Visible page summary" });
   });
 
-  it("adds a local-network hint to an unreachable analysis request", async () => {
+  it("adds a local-network hint to an unreachable agent request", async () => {
     const providerError = new RuntimeRequestError(
       "PROVIDER_UNREACHABLE",
       "The model provider could not be reached.",

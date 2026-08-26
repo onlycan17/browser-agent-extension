@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "../src/shared/agent";
-import type { ToolCall } from "../src/shared/llm";
+import type { RequestAttachment } from "../src/shared/attachments";
+import type { ChatRequest, ToolCall } from "../src/shared/llm";
 import type { PageSnapshot } from "../src/shared/page";
 import {
   AGENT_EMERGENCY_STEP_LIMIT,
@@ -14,6 +15,13 @@ const settings = {
   provider: "local" as const,
   baseUrl: LOCAL_BASE_URL,
   model: DEFAULT_LOCAL_MODEL,
+  rememberApiKey: false,
+};
+const anthropicSettings = {
+  provider: "anthropic" as const,
+  baseUrl: "https://api.anthropic.com",
+  model: "claude-sonnet-4-20250514",
+  apiKey: "test-key",
   rememberApiKey: false,
 };
 const snapshot: PageSnapshot = {
@@ -38,6 +46,11 @@ const enterCall: ToolCall = {
   id: "call-enter",
   type: "function",
   function: { name: "press_key", arguments: '{"key":"Enter"}' },
+};
+const captureCall: ToolCall = {
+  id: "call-capture",
+  type: "function",
+  function: { name: "capture_screen", arguments: "{}" },
 };
 
 function tabs() {
@@ -81,6 +94,28 @@ describe("AgentRunner", () => {
     expect(runner.decideApproval("run-approved", "approval-1", true)).toBe(false);
   });
 
+  it("returns a direct answer without executing a browser tool", async () => {
+    let executions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      { complete: () => Promise.resolve({ role: "assistant", content: "Direct answer" }) },
+      {
+        execute: (call) => {
+          executions += 1;
+          return successfulTool().execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-direct", "Explain this page", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Direct answer", steps: 1 });
+    expect(executions).toBe(0);
+  });
+
   it("honors cancellation received before run registration", async () => {
     let pinned = false;
     const runner = new AgentRunner(
@@ -103,6 +138,268 @@ describe("AgentRunner", () => {
 
     expect(result).toMatchObject({ runId: "run-early", status: "cancelled" });
     expect(pinned).toBe(false);
+  });
+
+  it("guides bounded transcript discovery for video analysis", async () => {
+    let requestBody: ChatRequest | undefined;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          requestBody = request;
+          return Promise.resolve({ role: "assistant", content: "Finished" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    await runner.run("run-transcript-guidance", "Analyze the full video", false);
+
+    const systemMessage = requestBody?.messages[0];
+    expect(systemMessage).toMatchObject({ role: "system" });
+    const systemPrompt = systemMessage?.role === "system" ? systemMessage.content : "";
+    expect(systemPrompt).toContain("unified browser assistant");
+    expect(systemPrompt).toContain("do not use tools when");
+    expect(systemPrompt).toContain("Use capture_screen only when visual evidence is necessary");
+    expect(systemPrompt).toContain("<video_transcript_guidance>");
+    expect(systemPrompt).toContain("use a full transcript already present");
+    expect(systemPrompt).toContain("More > Show transcript");
+    expect(systemPrompt).toContain(
+      "If the refreshed observation has no transcript control, stop discovery immediately",
+    );
+    expect(systemPrompt).toContain("exact observed element IDs");
+    expect(systemPrompt).toContain("re-observe");
+    expect(systemPrompt).toContain("at most two control actions");
+    expect(systemPrompt).toContain("Do not guess selectors");
+    expect(systemPrompt).not.toContain("or Captions");
+    expect(JSON.stringify(requestBody?.messages.slice(1))).not.toContain(
+      "<video_transcript_guidance>",
+    );
+  });
+
+  it("includes attachments without granting autonomous screenshot access", async () => {
+    let requestBody: ChatRequest | undefined;
+    const attachments: RequestAttachment[] = [
+      {
+        kind: "text",
+        name: "notes.txt",
+        mediaType: "text/plain",
+        text: "Agent attachment",
+        size: 16,
+        truncated: false,
+      },
+      {
+        kind: "image",
+        name: "reference.png",
+        mediaType: "image/png",
+        dataUrl: "data:image/png;base64,YWJj",
+        size: 3,
+      },
+    ];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          requestBody = request;
+          return Promise.resolve({ role: "assistant", content: "Attachments read" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    await runner.run("run-attachments", "Read the files", false, attachments);
+
+    const serialized = JSON.stringify(requestBody);
+    expect(serialized).toContain("Agent attachment");
+    expect(serialized).toContain("data:image/png;base64,YWJj");
+    expect(requestBody?.tools?.map((tool) => tool.function.name)).not.toContain("capture_screen");
+  });
+
+  it.each([
+    { allowScreenshots: false, expected: false },
+    { allowScreenshots: true, expected: true },
+  ])(
+    "sets capture_screen availability to $expected when screenshot permission is $allowScreenshots",
+    async ({ allowScreenshots, expected }) => {
+      let requestBody: ChatRequest | undefined;
+      let captures = 0;
+      const runner = new AgentRunner(
+        { loadRuntime: () => Promise.resolve(settings) },
+        {
+          ...tabs(),
+          captureActivePage: () => {
+            captures += 1;
+            return Promise.resolve("data:image/png;base64,abc");
+          },
+        },
+        {
+          complete: (_settings, request) => {
+            requestBody = request;
+            return Promise.resolve({ role: "assistant", content: "Finished" });
+          },
+        },
+        successfulTool(),
+        new ApprovalManager(),
+        () => undefined,
+      );
+
+      await runner.run("run-capture-capability", "Inspect visually", allowScreenshots);
+
+      const names = requestBody?.tools?.map((tool) => tool.function.name) ?? [];
+      expect(names.includes("capture_screen")).toBe(expected);
+      expect(captures).toBe(0);
+    },
+  );
+
+  it("captures a fresh screen and defers later calls until the model sees it", async () => {
+    let completions = 0;
+    let captures = 0;
+    let executions = 0;
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        captureActivePage: () => {
+          captures += 1;
+          return Promise.resolve(`data:image/png;base64,capture${String(captures)}`);
+        },
+      },
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          return Promise.resolve(
+            completions === 1
+              ? {
+                  role: "assistant" as const,
+                  content: null,
+                  tool_calls: [captureCall, scrollCall],
+                }
+              : { role: "assistant" as const, content: "Visual inspection finished" },
+          );
+        },
+      },
+      {
+        execute: (call) => {
+          executions += 1;
+          return successfulTool().execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-fresh-capture", "Inspect after changes", true);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Visual inspection finished" });
+    expect(captures).toBe(1);
+    expect(executions).toBe(0);
+    expect(JSON.stringify(requests[1]?.messages)).toContain("Fresh screen capture");
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "Deferred until a fresh page observation.",
+    );
+  });
+
+  it("retries capture_screen after a transient capture failure", async () => {
+    let completions = 0;
+    let captures = 0;
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        captureActivePage: () => {
+          captures += 1;
+          if (captures === 1) return Promise.reject(new Error("transient capture failure"));
+          return Promise.resolve(`data:image/png;base64,capture${String(captures)}`);
+        },
+      },
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 3) {
+            return Promise.resolve({ role: "assistant" as const, content: "Capture recovered" });
+          }
+          return Promise.resolve({
+            role: "assistant" as const,
+            content: null,
+            tool_calls: [{ ...captureCall, id: `capture-${String(completions)}` }],
+          });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-capture-retry", "Retry a fresh capture", true);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Capture recovered", steps: 3 });
+    expect(captures).toBe(2);
+    expect(JSON.stringify(requests[1]?.messages)).toContain("The screen capture failed.");
+    expect(JSON.stringify(requests[2]?.messages)).toContain("Fresh screen capture");
+    expect(JSON.stringify(requests[2]?.messages)).not.toContain(
+      "This failed action will not be repeated.",
+    );
+  });
+
+  it("enforces the six-capture on-demand run budget", async () => {
+    let completions = 0;
+    let captures = 0;
+    let observations = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        observeActivePage: () => {
+          observations += 1;
+          return Promise.resolve({
+            ...snapshot,
+            visibleText: `state-${String.fromCharCode(64 + observations)}`,
+          });
+        },
+        captureActivePage: () => {
+          captures += 1;
+          return Promise.resolve(`data:image/png;base64,capture${String(captures)}`);
+        },
+      },
+      {
+        complete: () => {
+          completions += 1;
+          if (completions === 7) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: "Capture budget respected",
+            });
+          }
+          return Promise.resolve({
+            role: "assistant" as const,
+            content: null,
+            tool_calls: [{ ...captureCall, id: `capture-${String(completions)}` }],
+          });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-capture-budget", "Inspect several views", true);
+
+    expect(result).toMatchObject({
+      status: "completed",
+      answer: "Capture budget respected",
+      steps: 7,
+    });
+    expect(captures).toBe(6);
   });
 
   it("executes a tool round and returns the final answer", async () => {
@@ -131,7 +428,161 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({ status: "completed", answer: "Finished", steps: 2 });
     expect(completion).toBe(2);
     expect(events.some((event) => event.type === "AGENT_PROGRESS")).toBe(true);
-    expect(events.at(-1)?.type).toBe("AGENT_FINISHED");
+    expect(events.some((event) => event.type === "AGENT_FINISHED")).toBe(false);
+  });
+
+  it("recovers a blank Local response and disables reasoning token usage", async () => {
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          requests.push({ ...request, messages: [...request.messages] });
+          return Promise.resolve(
+            requests.length === 1
+              ? { role: "assistant" as const, content: "   " }
+              : { role: "assistant" as const, content: "Video analysis finished" },
+          );
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-empty-local", "Analyze the video", false);
+
+    expect(result).toMatchObject({
+      status: "completed",
+      answer: "Video analysis finished",
+      steps: 2,
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.reasoningEffort).toBe("none");
+    expect(requests[1]?.messages.at(-1)).toMatchObject({ role: "user" });
+    expect(JSON.stringify(requests[1]?.messages)).toContain("previous response was empty");
+  });
+
+  it("recovers an empty tool-call array without replaying an invalid assistant turn", async () => {
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(anthropicSettings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          requests.push({ ...request, messages: [...request.messages] });
+          return Promise.resolve(
+            requests.length === 1
+              ? { role: "assistant" as const, content: null, tool_calls: [] }
+              : { role: "assistant" as const, content: "Recovered safely" },
+          );
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-empty-tools", "Complete the task", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Recovered safely", steps: 2 });
+    expect(requests[0]?.reasoningEffort).toBeUndefined();
+    expect(requests[1]?.messages).not.toContainEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [],
+    });
+  });
+
+  it("allows two consecutive empty-response retries before a final answer", async () => {
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completions += 1;
+          return Promise.resolve(
+            completions < 3
+              ? { role: "assistant" as const, content: null, tool_calls: [] }
+              : { role: "assistant" as const, content: "Recovered on the last retry" },
+          );
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-empty-boundary", "Complete the task", false);
+
+    expect(result).toMatchObject({
+      status: "completed",
+      answer: "Recovered on the last retry",
+      steps: 3,
+    });
+  });
+
+  it("resets the empty-response retry counter after a tool call", async () => {
+    let completions = 0;
+    let executions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completions += 1;
+          if (completions === 2) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [scrollCall],
+            });
+          }
+          if (completions === 4) {
+            return Promise.resolve({ role: "assistant" as const, content: "Finished after reset" });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: null, tool_calls: [] });
+        },
+      },
+      {
+        execute: (call) => {
+          executions += 1;
+          return successfulTool().execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-empty-reset", "Complete the task", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Finished after reset", steps: 4 });
+    expect(executions).toBe(1);
+  });
+
+  it("fails with a protocol error after two empty-response retries", async () => {
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completions += 1;
+          return Promise.resolve({ role: "assistant", content: null, tool_calls: [] });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    await expect(runner.run("run-empty-limit", "Complete the task", false)).rejects.toMatchObject({
+      code: "MODEL_PROTOCOL_ERROR",
+      retryable: false,
+    });
+    expect(completions).toBe(3);
   });
 
   it.each([
@@ -247,6 +698,42 @@ describe("AgentRunner", () => {
     const result = await runner.run("run-long", "Finish a long task", false);
 
     expect(result).toMatchObject({ status: "completed", answer: "Long task finished", steps: 14 });
+  });
+
+  it("re-plans once when an action repeats without changing the page", async () => {
+    let completions = 0;
+    const requests: ChatRequest[] = [];
+    const events: AgentEvent[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          return Promise.resolve(
+            completions < 3
+              ? { role: "assistant" as const, content: null, tool_calls: [scrollCall] }
+              : { role: "assistant" as const, content: "Recovered with a new approach" },
+          );
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      (event) => events.push(event),
+    );
+
+    const result = await runner.run("run-replan", "Find another way", true);
+
+    expect(result).toMatchObject({
+      status: "completed",
+      answer: "Recovered with a new approach",
+      steps: 3,
+    });
+    expect(JSON.stringify(requests[2]?.messages)).toContain("Re-plan once");
+    expect(
+      events.filter((event) => event.type === "AGENT_PROGRESS" && event.payload.code === "REPLAN"),
+    ).toHaveLength(1);
   });
 
   it("stops when the same action produces the same page three times", async () => {

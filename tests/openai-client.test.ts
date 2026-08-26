@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAICompatibleClient, ProviderError } from "../src/background/openai-client";
-import { createVisionContent, type ToolDefinition } from "../src/shared/llm";
+import type { ToolDefinition } from "../src/shared/llm";
 import {
   DEFAULT_LOCAL_MODEL,
   LOCAL_BASE_URL,
@@ -159,7 +159,7 @@ describe("OpenAICompatibleClient", () => {
     expect(readBody(requests[0])).not.toHaveProperty("reasoning_effort");
   });
 
-  it("sends image content and parses tool calls", async () => {
+  it("sends multiple image content parts and parses tool calls", async () => {
     const requests: CapturedRequest[] = [];
     const response = jsonResponse({
       choices: [
@@ -184,7 +184,11 @@ describe("OpenAICompatibleClient", () => {
       messages: [
         {
           role: "user",
-          content: createVisionContent("Describe the page", "data:image/png;base64,abc"),
+          content: [
+            { type: "text", text: "Describe the page" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+            { type: "image_url", image_url: { url: "data:image/webp;base64,ZGVm" } },
+          ],
         },
       ],
       tools: [clickTool],
@@ -202,7 +206,8 @@ describe("OpenAICompatibleClient", () => {
         {
           content: [
             { type: "text", text: "Describe the page" },
-            { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+            { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+            { type: "image_url", image_url: { url: "data:image/webp;base64,ZGVm" } },
           ],
         },
       ],
@@ -235,8 +240,22 @@ describe("OpenAICompatibleClient", () => {
     },
   );
 
-  it("rejects malformed assistant messages", async () => {
-    const client = new OpenAICompatibleClient(mockFetch(jsonResponse({ choices: [] })));
+  it("preserves an explicit empty assistant turn for runner recovery", async () => {
+    const client = new OpenAICompatibleClient(
+      mockFetch(jsonResponse({ choices: [{ message: { role: "assistant", content: null } }] })),
+    );
+
+    await expect(client.complete(localSettings, { messages: [] })).resolves.toEqual({
+      role: "assistant",
+      content: null,
+    });
+  });
+
+  it.each([
+    { label: "missing choices", response: { choices: [] } },
+    { label: "missing content", response: { choices: [{ message: { role: "assistant" } }] } },
+  ])("rejects malformed assistant messages with $label", async ({ response }) => {
+    const client = new OpenAICompatibleClient(mockFetch(jsonResponse(response)));
 
     await expect(client.complete(localSettings, { messages: [] })).rejects.toMatchObject({
       code: "MODEL_PROTOCOL_ERROR",

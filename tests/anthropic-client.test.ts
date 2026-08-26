@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicClient } from "../src/background/anthropic-client";
-import { createVisionContent, type ToolDefinition } from "../src/shared/llm";
+import type { ToolDefinition } from "../src/shared/llm";
 import { ANTHROPIC_BASE_URL } from "../src/shared/settings";
 
 const anthropicSettings = {
@@ -71,7 +71,7 @@ describe("AnthropicClient", () => {
     });
   });
 
-  it("translates system, image, and tool definitions to Messages API", async () => {
+  it("translates system, multiple images, and tools to Messages API", async () => {
     const requests: CapturedRequest[] = [];
     const client = new AnthropicClient(
       mockFetch(
@@ -91,7 +91,11 @@ describe("AnthropicClient", () => {
         { role: "system", content: "Stay safe." },
         {
           role: "user",
-          content: createVisionContent("Describe", "data:image/png;base64,YWJj"),
+          content: [
+            { type: "text", text: "Describe" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+            { type: "image_url", image_url: { url: "data:image/webp;base64,ZGVm" } },
+          ],
         },
       ],
       tools: [clickTool],
@@ -117,6 +121,10 @@ describe("AnthropicClient", () => {
             {
               type: "image",
               source: { type: "base64", media_type: "image/png", data: "YWJj" },
+            },
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/webp", data: "ZGVm" },
             },
           ],
         },
@@ -199,6 +207,20 @@ describe("AnthropicClient", () => {
       });
     },
   );
+
+  it.each([
+    { label: "empty content", content: [] },
+    { label: "reasoning-only content", content: [{ type: "thinking", thinking: "Working" }] },
+  ])("preserves $label for runner recovery", async ({ content }) => {
+    const client = new AnthropicClient(() =>
+      Promise.resolve(jsonResponse({ role: "assistant", content })),
+    );
+
+    await expect(client.complete(anthropicSettings, { messages: [] })).resolves.toEqual({
+      role: "assistant",
+      content: null,
+    });
+  });
 
   it("rejects malformed tool responses", async () => {
     const client = new AnthropicClient(() =>

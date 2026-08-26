@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { parseRuntimeRequest } from "../src/shared/messages";
 import { DEFAULT_LOCAL_MODEL, LOCAL_BASE_URL } from "../src/shared/settings";
 
+const attachment = {
+  kind: "text" as const,
+  name: "notes.txt",
+  mediaType: "text/plain" as const,
+  text: "Reference notes",
+  size: 15,
+  truncated: false,
+};
+
 const settings = {
   provider: "local",
   baseUrl: LOCAL_BASE_URL,
@@ -27,10 +36,28 @@ describe("runtime message parser", () => {
     const result = parseRuntimeRequest({
       id: "request-2",
       type: "AGENT_RUN_REQUEST",
-      payload: { runId: "run-1", instruction: "Inspect the page", includeScreenshot: false },
+      payload: {
+        runId: "run-1",
+        instruction: "Inspect the page",
+        allowScreenshots: false,
+        attachments: [attachment],
+      },
     });
 
     expect(result).toMatchObject({ ok: true, value: { payload: { runId: "run-1" } } });
+  });
+
+  it("accepts a heartbeat for an active run ID", () => {
+    const result = parseRuntimeRequest({
+      id: "request-3",
+      type: "AGENT_KEEPALIVE",
+      payload: { runId: "run-1" },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: { id: "request-3", type: "AGENT_KEEPALIVE", payload: { runId: "run-1" } },
+    });
   });
 
   it.each([
@@ -42,7 +69,11 @@ describe("runtime message parser", () => {
       {
         id: "1",
         type: "AGENT_RUN_REQUEST",
-        payload: { instruction: "Missing run ID", includeScreenshot: false },
+        payload: {
+          instruction: "Missing run ID",
+          allowScreenshots: false,
+          attachments: [],
+        },
       },
       "Agent request",
     ],
