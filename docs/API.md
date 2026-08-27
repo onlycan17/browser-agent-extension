@@ -187,7 +187,7 @@ Side Panel은 실행 중 20초마다 heartbeat를 보낸다. Service Worker는 �
     scrollableX?: boolean;
     scrollableY?: boolean;
   }>;
-  youtube?: YouTubeState;
+  youtube?: YouTubeState; // durationKnown과 isLive 포함
 }
 ```
 
@@ -264,11 +264,13 @@ Radio는 `checked: true`만 허용한다. Select와 checked 상태 변경은 사
 
 허용 키: `Enter`, `Escape`, `Tab`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`.
 
-`expected`는 `PAGE_OBSERVE`에서 받은 해당 요소 원본이다. Content Script는 실제 동작 직전에 요소의 가시성, 가림 여부, 이름, 역할, 선택·체크·스크롤 상태, 입력 메타데이터와 위치를 다시 비교하며 달라졌으면 실행하지 않는다. 텍스트 입력은 대상을 먼저 focus하고, focus된 폼 입력에서 승인된 `Enter`는 브라우저 폼 검증을 거쳐 `requestSubmit()`으로 제출한다. 페이지 스크롤과 내부 스크롤은 `behavior: "auto"`를 사용해 smooth-scroll 중간 상태를 재관찰하지 않는다. 클릭·Enter·select·checked 동작은 최대 1.5초 동안 300ms DOM quiet period를 기다린다.
+`expected`는 `PAGE_OBSERVE`에서 받은 해당 요소 원본이다. Content Script는 실제 동작 직전에 요소의 가시성, 가림 여부, 이름, 역할, 선택·체크·스크롤 상태, 입력 메타데이터와 위치를 다시 비교하며 달라졌으면 실행하지 않는다. 텍스트 입력은 대상을 먼저 focus하고, focus된 폼 입력에서 승인된 `Enter`는 브라우저 폼 검증을 거쳐 `requestSubmit()`으로 제출한다. 페이지 스크롤과 내부 스크롤은 `behavior: "auto"`를 사용해 smooth-scroll 중간 상태를 재관찰하지 않는다. 클릭·Enter·select·checked 동작은 최대 1.5초 동안 300ms DOM quiet period를 기다린다. 성공 응답은 `{ message, pageSettled }`를 반환하며 `pageSettled: false`여도 이미 실행된 동작을 반복하지 않는다.
 
 Content Script의 action 오류 응답은 `STALE_ELEMENT`, `ELEMENT_NOT_FOUND`, `ELEMENT_OCCLUDED`, `UNSAFE_ACTION` 코드를 유지한다. Background는 이를 일반 연결 오류로 바꾸지 않고 tool result에 `code`, `message`, `retryable`로 전달한다.
 
 ### `YOUTUBE_CONTROL`
+
+길이가 유한하게 확인된 영상만 `seek`를 허용한다. 실시간·무한대·숫자가 아닌 길이에서는 `seek(0)`을 포함해 거부한다.
 
 ```ts
 {
@@ -286,6 +288,7 @@ Content Script의 action 오류 응답은 `STALE_ELEMENT`, `ELEMENT_NOT_FOUND`, 
 {
   cursor: number; // 0 이상
   maxChars: number; // 2,000~8,000
+  afterSegmentKey: string; // 첫 요청은 빈 문자열, 이후 직전 lastSegmentKey
 }
 
 // success data
@@ -302,10 +305,11 @@ type TranscriptChunkResult =
       text: string; // 새로운 구간만 포함, 최대 8,000자
       segmentCount: number;
       totalSegments: number;
+      lastSegmentKey: string;
     };
 ```
 
-Content Script는 열린 기존 `ytd-transcript-segment-renderer`, 최신 `transcript-segment-view-model`, 또는 명시적인 `data-transcript-*` 구간만 읽고 숨겨진 자막 패널과 인접 중복 구간을 제외한다. 각 호출은 타임스탬프 구간 경계에서 끝나며 `nextCursor`로 이어 읽는다.
+Content Script는 열린 기존 `ytd-transcript-segment-renderer`, 최신 `transcript-segment-view-model`, 또는 명시적인 `data-transcript-*` 구간만 읽고 숨겨진 자막 패널과 모든 중복 구간을 제외한다. 각 호출은 타임스탬프 구간 경계에서 끝난다. `nextCursor`는 진행률에 사용하고 `lastSegmentKey`는 DOM 앞쪽 삽입에도 안정적으로 이어 읽는 기준이다. 마지막 구간은 bounded DOM quiet check 뒤 새 구간이 없는 경우에만 `done: true`가 된다. quiet check가 제한 시간 안에 끝나지 않으면 `done: false`를 유지하고, 후속 구간을 더 읽을 수 없으면 확인된 범위만 `truncated: true` 부분 요약으로 합성한다.
 
 ## 4. LLM 요청
 
@@ -339,7 +343,7 @@ Authorization: Bearer {apiKey}  # 현재 선택된 provider에 저장된 apiKey�
 ]
 ```
 
-Agent에서 `allowScreenshots`가 true인 요청에만 zero-argument `capture_screen` 도구를 추가한다. 허용만으로 초기 화면을 캡처하지 않으며, 모델이 시각 정보가 필요하거나 DOM 기반 진행이 막혔을 때 요청한 캡처만 run당 최대 6회 수행한다. 새 캡처 뒤 같은 응답의 나머지 tool call은 deferred 처리하고 최신 DOM snapshot과 이미지를 다음 모델 단계에 전달한다.
+Agent에서 `allowScreenshots`가 true인 요청에만 zero-argument `capture_screen` 도구를 추가한다. 이 값은 이미지 입력 지원 모델을 사용한다는 사용자 요청 단위 동의이며 Side Panel은 제출 즉시 체크를 해제한다. 허용만으로 초기 화면을 캡처하지 않으며, 모델이 시각 정보가 필요하거나 DOM 기반 진행이 막혔을 때 요청한 캡처만 run당 최대 6회 수행한다. 캡처 앞에 다른 동작이 있으면 최신 재관찰 뒤 다음 턴으로 보류한다. 새 캡처는 path·query·fragment가 제거된 최신 구조화 페이지 관찰과 같은 multimodal user message로 전달하고, 같은 응답의 나머지 tool call은 deferred 처리한다.
 
 `summarize_video_transcript`는 열린 긴 자막 또는 영상 전체 요약에 사용하는 읽기 전용 도구다. 선택적인 `focus` 문자열은 최대 500자다. Service Worker의 `TranscriptSummaryService`가 최대 8,000자씩 자막을 읽어 독립적으로 요약하고, 요약 6개 단위로 반복 병합한 뒤 최종 결과만 메인 agent tool result로 반환한다. 자막 원문은 메인 agent history에 누적하지 않는다. 비정상적으로 긴 자막은 최대 64청크에서 멈추고 결과의 `truncated`를 `true`로 표시한다.
 
