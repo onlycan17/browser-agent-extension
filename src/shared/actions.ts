@@ -69,4 +69,5 @@ export type PageActionRequest =
 
 export interface PageActionResult {
   message: string;
+  pageSettled?: boolean;
 }

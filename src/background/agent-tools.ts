@@ -1,5 +1,5 @@
 import type { AgentEvent } from "../shared/agent";
-import { ALLOWED_KEYS, type PageActionRequest } from "../shared/actions";
+import { ALLOWED_KEYS, type PageActionRequest, type PageActionResult } from "../shared/actions";
 import type { ToolCall, ToolDefinition, ToolMessage } from "../shared/llm";
 import type { ObservedElement, PageSnapshot } from "../shared/page";
 import { ApprovalManager } from "./approval-manager";
@@ -206,6 +206,7 @@ export interface ToolExecutionResult {
   failed: boolean;
   signature: string;
   retryableFailure?: boolean;
+  pageSettled?: boolean;
 }
 
 interface ActionService {
@@ -213,7 +214,7 @@ interface ActionService {
     action: PageActionRequest,
     runId: string,
     signal?: AbortSignal,
-  ): Promise<{ message: string }>;
+  ): Promise<PageActionResult>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -553,9 +554,14 @@ export class AgentToolExecutor {
       const result = await this.actions.executeAction(pageAction(tool, element), runId, signal);
       signal.throwIfAborted();
       return {
-        message: toolMessage(call.id, { ok: true, message: result.message }),
+        message: toolMessage(call.id, {
+          ok: true,
+          message: result.message,
+          ...(result.pageSettled === undefined ? {} : { pageSettled: result.pageSettled }),
+        }),
         failed: false,
         signature: signature(tool),
+        ...(result.pageSettled === undefined ? {} : { pageSettled: result.pageSettled }),
       };
     } catch (error: unknown) {
       if (error instanceof PageActionError) {
