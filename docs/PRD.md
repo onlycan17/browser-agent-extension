@@ -38,7 +38,11 @@ Chrome 사이드 패널에서 현재 탭을 관찰하고, 사용자의 명시적
 - 현재 프레임은 탭 캡처로 분석한다.
 - 페이지에서 자막 텍스트를 안전하게 얻을 수 있는 경우 분석 컨텍스트에 포함한다.
 - 영상 전체 분석 요청에서는 관찰 결과에 이미 전체 스크립트가 있으면 컨트롤을 조작하지 않고 이를 우선 사용한다.
-- 전체 스크립트가 보이지 않으면 에이전트는 관찰된 현지화 버튼 중 `더보기`/`More`와 `스크립트`/`Transcript`/`Show transcript`에 해당하는 요소를 최대 2회 조작으로 탐색하고, 각 클릭 후 페이지를 재관찰한다.
+- 열린 전체 스크립트가 길면 타임스탬프 경계의 최대 8,000자 구간으로 나누고, 구간 요약을 6개 단위로 계층적으로 합쳐 전체 요약을 만든다.
+- 최신 `transcript-segment-view-model`과 기존 YouTube 자막 구간을 모두 지원하며, 전체 영상 분석을 위해 영상을 끝까지 재생하거나 종료를 기다리지 않는다.
+- 긴 자막 원문은 메인 에이전트 대화 기록에 누적하지 않으며, 최종 압축 결과에 분석한 시간 범위를 표시한다.
+- 전체 스크립트가 보이지 않으면 에이전트는 YouTube 데스크톱 영상 설명 영역의 `더보기(More) → 스크립트 표시(Show transcript)`를 최대 2회 조작으로 탐색한다. 스크립트 표시 뒤 영상 오른쪽에 자막 패널이 열린다는 점을 분석 안내에 명시하고 페이지를 재관찰한다.
+- 다른 영상 사이트 또는 좁은 화면에서는 오른쪽 패널 위치를 단정하지 않고 관찰된 Transcript/Script 컨트롤과 실제 배치를 따른다.
 - 에이전트는 selector를 추측하거나 실패한 탐색을 반복하지 않으며, 전체 스크립트를 찾지 못하면 현재 자막·프레임만 분석했음을 알린다.
 - 페이지를 변경하지 않는 화면 분석은 현재 자막과 전체 스크립트를 구분하고, 전체 스크립트가 관찰되지 않으면 열어야 할 컨트롤을 안내하되 직접 열었다고 주장하지 않는다.
 - MVP는 현재 보이는 프레임을 분석하며, 구간별 자동 프레임 샘플링은 후속 범위로 둔다.
@@ -116,7 +120,7 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 
 비밀번호, 결제 카드 번호, 인증 코드 입력은 MVP에서 지원하지 않으며 요청 전체 승인으로도 허용되지 않는다.
 
-입력 필드의 `autocomplete` 메타데이터가 `one-time-code`, password 또는 결제 카드 계열이면 라벨과 `type`이 평범해도 차단한다. 승인된 요소는 실행 직전에 관찰 당시 DOM 상태와 다시 비교하며 숨김·이동·이름·역할·입력 메타데이터 변경이 있으면 실행하지 않는다. 일반 페이지 텍스트에서는 입력 요소, 편집 중인 `contenteditable` 초안과 현재 뷰포트 밖 텍스트를 제외한다.
+입력 필드의 `autocomplete` 메타데이터가 `one-time-code`, password 또는 결제 카드 계열이면 라벨과 `type`이 평범해도 차단한다. 승인된 요소는 실행 직전에 관찰 당시 DOM 상태와 다시 비교하며 숨김·이동·가림·이름·역할·선택·체크·스크롤·입력 메타데이터 변경이 있으면 실행하지 않는다. 일반 페이지 텍스트에서는 입력 요소, 편집 중인 `contenteditable` 초안과 현재 뷰포트 밖 텍스트를 제외한다. Select는 내부 value 없이 표시 라벨만, checkbox/radio는 문자열 value 없이 boolean 상태만 구조화한다.
 
 ## 5. 제외 범위
 
@@ -141,13 +145,15 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 - unpacked extension으로 오류 없이 로드된다.
 - 기본 로컬 프로바이더에서 모델 목록 및 채팅 연결 검사가 성공한다.
 - OpenAI, Anthropic, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI와 HTTPS OpenAI-compatible custom 프로바이더를 선택하고 설정할 수 있다.
-- 일반 웹 페이지에서 하나의 메시지 기능으로 직접 답변, 능동적 화면 분석, 클릭, 안전한 텍스트 입력, 스크롤이 동작한다.
+- 일반 웹 페이지에서 하나의 메시지 기능으로 직접 답변, 능동적 화면 분석, 클릭, 안전한 텍스트 입력, select·checkbox/radio 변경, 페이지·중첩 컨테이너 스크롤이 동작한다.
+- 가려진 요소는 관찰·실행에서 제외하고, 클릭·Enter·폼 상태 변경 뒤 bounded DOM quiet period 후 새 화면을 재관찰한다.
 - 승인된 클릭·Enter로 발생한 same-origin navigation 이후 새 페이지를 재관찰해 복합 작업을 계속하며, 재관찰 전에는 같은 모델 응답의 남은 도구를 실행하지 않는다.
 - Provider에는 현재 페이지 URL의 origin만 전달하고 path, query, fragment는 제외한다.
 - 화면 캡처 권한이 만료되면 대상 탭에서 toolbar action을 다시 클릭하도록 안내한다.
 - Local provider 통합 요청은 Side Panel에서 Local Network Access probe를 먼저 수행하고, Service Worker 요청도 실패할 때 권한과 서버 상태를 함께 안내한다.
 - Local reasoning 모델의 통합 agent 요청은 reasoning을 비활성화해 token 예산을 tool call 또는 최종 답변에 사용한다.
 - YouTube에서 상태 읽기와 재생 제어가 동작한다.
+- 열린 긴 영상 자막을 구간별로 처리해 타임스탬프 목차가 있는 전체 요약을 만들고 진행 중 취소할 수 있다.
 - 모델이 tool call을 반환하면 완료까지 정책을 준수해 실행하고, 빈 응답은 최대 2회 복구한 뒤 protocol 오류로 종료하며, 정체·100단계·30분 안전 한도에서 중단한다.
 - 5분을 넘는 agent 실행도 초기 runtime message 채널 종료로 최종 결과를 유실하지 않는다.
 - 위험 동작과 비밀번호 입력이 차단된다.

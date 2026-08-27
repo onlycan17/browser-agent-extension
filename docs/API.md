@@ -182,12 +182,16 @@ Side Panel은 실행 중 20초마다 heartbeat를 보낸다. Service Worker는 �
     autocomplete?: string;
     href?: string;
     download?: boolean;
+    checked?: boolean;
+    options?: Array<{ label: string; selected: boolean; disabled: boolean }>;
+    scrollableX?: boolean;
+    scrollableY?: boolean;
   }>;
   youtube?: YouTubeState;
 }
 ```
 
-텍스트와 element 수에는 상한을 둔다. `visibleText`는 현재 뷰포트와 교차하는 렌더링 텍스트만 포함하며 입력 요소와 `contenteditable` 초안을 제외한다. 입력값은 종류와 관계없이 포함하지 않는다.
+텍스트와 element 수에는 상한을 둔다. `visibleText`는 현재 뷰포트와 교차하는 렌더링 텍스트만 포함하며 입력 요소와 `contenteditable` 초안을 제외한다. 입력의 문자열 `value`와 select option의 내부 `value`는 포함하지 않는다. 관찰 가능한 checkbox/radio의 boolean 상태와 최대 50개 option의 표시 라벨만 구조화한다. 요소 중앙이 다른 요소에 가려졌으면 조작 대상에서 제외한다.
 
 ### `PAGE_CLICK`
 
@@ -220,11 +224,49 @@ Side Panel은 실행 중 20초마다 heartbeat를 보낸다. Service Worker는 �
 }
 ```
 
+### `PAGE_SELECT_OPTION`
+
+```ts
+{
+  generation: number;
+  elementId: string;
+  optionLabel: string; // 최신 관찰에 있는 정확한 표시 라벨, 최대 300자
+  expected: ObservedElement;
+}
+```
+
+### `PAGE_SET_CHECKED`
+
+```ts
+{
+  generation: number;
+  elementId: string;
+  checked: boolean;
+  expected: ObservedElement;
+}
+```
+
+Radio는 `checked: true`만 허용한다. Select와 checked 상태 변경은 사이트의 change handler를 실행할 수 있으므로 승인 대상이다.
+
+### `PAGE_SCROLL_ELEMENT`
+
+```ts
+{
+  generation: number;
+  elementId: string;
+  direction: "up" | "down" | "left" | "right";
+  amount: number; // 1~2,000
+  expected: ObservedElement;
+}
+```
+
 ### `PAGE_PRESS_KEY`
 
 허용 키: `Enter`, `Escape`, `Tab`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`.
 
-`expected`는 `PAGE_OBSERVE`에서 받은 해당 요소 원본이다. Content Script는 실제 동작 직전에 요소의 가시성, 이름, 역할, 입력 메타데이터와 위치를 다시 비교하며 달라졌으면 실행하지 않는다. 텍스트 입력은 대상을 먼저 focus하고, focus된 폼 입력에서 승인된 `Enter`는 브라우저 폼 검증을 거쳐 `requestSubmit()`으로 제출한다.
+`expected`는 `PAGE_OBSERVE`에서 받은 해당 요소 원본이다. Content Script는 실제 동작 직전에 요소의 가시성, 가림 여부, 이름, 역할, 선택·체크·스크롤 상태, 입력 메타데이터와 위치를 다시 비교하며 달라졌으면 실행하지 않는다. 텍스트 입력은 대상을 먼저 focus하고, focus된 폼 입력에서 승인된 `Enter`는 브라우저 폼 검증을 거쳐 `requestSubmit()`으로 제출한다. 페이지 스크롤과 내부 스크롤은 `behavior: "auto"`를 사용해 smooth-scroll 중간 상태를 재관찰하지 않는다. 클릭·Enter·select·checked 동작은 최대 1.5초 동안 300ms DOM quiet period를 기다린다.
+
+Content Script의 action 오류 응답은 `STALE_ELEMENT`, `ELEMENT_NOT_FOUND`, `ELEMENT_OCCLUDED`, `UNSAFE_ACTION` 코드를 유지한다. Background는 이를 일반 연결 오류로 바꾸지 않고 tool result에 `code`, `message`, `retryable`로 전달한다.
 
 ### `YOUTUBE_CONTROL`
 
@@ -234,6 +276,36 @@ Side Panel은 실행 중 20초마다 heartbeat를 보낸다. Service Worker는 �
   value?: number;
 }
 ```
+
+### `TRANSCRIPT_READ_CHUNK`
+
+열린 영상 자막 패널에서 구조화된 타임스탬프 구간만 읽는 전용 요청이다. 일반 페이지 본문은 이 경로에 포함하지 않는다.
+
+```ts
+// request
+{
+  cursor: number; // 0 이상
+  maxChars: number; // 2,000~8,000
+}
+
+// success data
+type TranscriptChunkResult =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      cursor: number;
+      nextCursor: number;
+      done: boolean;
+      startTime: string;
+      endTime: string;
+      contextText: string; // 직전 최대 2개 구간, 최대 2,000자
+      text: string; // 새로운 구간만 포함, 최대 8,000자
+      segmentCount: number;
+      totalSegments: number;
+    };
+```
+
+Content Script는 열린 기존 `ytd-transcript-segment-renderer`, 최신 `transcript-segment-view-model`, 또는 명시적인 `data-transcript-*` 구간만 읽고 숨겨진 자막 패널과 인접 중복 구간을 제외한다. 각 호출은 타임스탬프 구간 경계에서 끝나며 `nextCursor`로 이어 읽는다.
 
 ## 4. LLM 요청
 
@@ -268,6 +340,8 @@ Authorization: Bearer {apiKey}  # 현재 선택된 provider에 저장된 apiKey�
 ```
 
 Agent에서 `allowScreenshots`가 true인 요청에만 zero-argument `capture_screen` 도구를 추가한다. 허용만으로 초기 화면을 캡처하지 않으며, 모델이 시각 정보가 필요하거나 DOM 기반 진행이 막혔을 때 요청한 캡처만 run당 최대 6회 수행한다. 새 캡처 뒤 같은 응답의 나머지 tool call은 deferred 처리하고 최신 DOM snapshot과 이미지를 다음 모델 단계에 전달한다.
+
+`summarize_video_transcript`는 열린 긴 자막 또는 영상 전체 요약에 사용하는 읽기 전용 도구다. 선택적인 `focus` 문자열은 최대 500자다. Service Worker의 `TranscriptSummaryService`가 최대 8,000자씩 자막을 읽어 독립적으로 요약하고, 요약 6개 단위로 반복 병합한 뒤 최종 결과만 메인 agent tool result로 반환한다. 자막 원문은 메인 agent history에 누적하지 않는다. 비정상적으로 긴 자막은 최대 64청크에서 멈추고 결과의 `truncated`를 `true`로 표시한다.
 
 도구 정의:
 
