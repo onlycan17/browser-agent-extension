@@ -5,15 +5,27 @@ import {
   type ObservedElement,
   type PageSnapshot,
 } from "./page";
+import {
+  parseTranscriptChunkRequest,
+  parseTranscriptChunkResult,
+  type TranscriptChunkResult,
+} from "./transcript";
 
 export type ContentRequest =
   | { id: string; type: "CONTENT_PING"; payload: Record<string, never> }
   | { id: string; type: "PAGE_OBSERVE"; payload: Record<string, never> }
+  | { id: string; type: "TRANSCRIPT_READ_CHUNK"; payload: { cursor: number; maxChars: number } }
   | ({ id: string } & PageActionRequest);
 
 export type ContentResponse<T> =
   | { id: string; ok: true; data: T }
   | { id: string; ok: false; error: { code: string; message: string; retryable: boolean } };
+
+export interface ContentErrorData {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -47,6 +59,10 @@ function parseGuardedTarget(
       "autocomplete",
       "href",
       "download",
+      "checked",
+      "options",
+      "scrollableX",
+      "scrollableY",
     ])
   ) {
     return null;
@@ -88,6 +104,46 @@ function parseYouTubeControl(payload: unknown): PageActionRequest | null {
     : null;
 }
 
+function parseGuardedElementAction(
+  type: "PAGE_SELECT_OPTION" | "PAGE_SET_CHECKED" | "PAGE_SCROLL_ELEMENT",
+  payload: unknown,
+): PageActionRequest | null {
+  if (!isRecord(payload)) return null;
+  const extraKeys =
+    type === "PAGE_SELECT_OPTION"
+      ? ["optionLabel"]
+      : type === "PAGE_SET_CHECKED"
+        ? ["checked"]
+        : ["direction", "amount"];
+  if (!hasOnlyKeys(payload, ["generation", "elementId", "expected", ...extraKeys])) return null;
+  const target = parseGuardedTarget({
+    generation: payload.generation,
+    elementId: payload.elementId,
+    expected: payload.expected,
+  });
+  if (target === null) return null;
+  if (type === "PAGE_SELECT_OPTION") {
+    if (
+      typeof payload.optionLabel !== "string" ||
+      payload.optionLabel.length === 0 ||
+      payload.optionLabel.length > 300
+    ) {
+      return null;
+    }
+    return { type, payload: { ...target, optionLabel: payload.optionLabel } };
+  }
+  if (type === "PAGE_SET_CHECKED") {
+    return typeof payload.checked === "boolean"
+      ? { type, payload: { ...target, checked: payload.checked } }
+      : null;
+  }
+  const directions = ["up", "down", "left", "right"] as const;
+  const direction = directions.find((item) => item === payload.direction);
+  if (direction === undefined || !Number.isInteger(payload.amount)) return null;
+  const amount = Number(payload.amount);
+  return amount < 1 || amount > 2000 ? null : { type, payload: { ...target, direction, amount } };
+}
+
 function parseAction(type: unknown, payload: unknown): PageActionRequest | null {
   if (type === "PAGE_CLICK") {
     const target = parseGuardedTarget(payload);
@@ -103,6 +159,13 @@ function parseAction(type: unknown, payload: unknown): PageActionRequest | null 
     return key === undefined ? null : { type, payload: { key } };
   }
   if (type === "YOUTUBE_CONTROL") return parseYouTubeControl(payload);
+  if (
+    type === "PAGE_SELECT_OPTION" ||
+    type === "PAGE_SET_CHECKED" ||
+    type === "PAGE_SCROLL_ELEMENT"
+  ) {
+    return parseGuardedElementAction(type, payload);
+  }
   if (type !== "PAGE_SCROLL" || !isRecord(payload)) return null;
   if (!hasOnlyKeys(payload, ["direction", "amount"])) return null;
   const directions = ["up", "down", "left", "right"] as const;
@@ -125,8 +188,43 @@ export function parseContentRequest(value: unknown): ContentRequest | null {
     if (!isRecord(base.payload) || Object.keys(base.payload).length > 0) return null;
     return { id: base.id, type: base.type, payload: {} };
   }
+  if (base.type === "TRANSCRIPT_READ_CHUNK") {
+    const payload = parseTranscriptChunkRequest(base.payload);
+    return payload === null ? null : { id: base.id, type: base.type, payload };
+  }
   const action = parseAction(base.type, base.payload);
   return action === null ? null : { id: base.id, ...action };
+}
+
+export function parseTranscriptChunkResponse(
+  value: unknown,
+  id: string,
+): TranscriptChunkResult | null {
+  if (!isRecord(value) || value.id !== id || value.ok !== true) return null;
+  return parseTranscriptChunkResult(value.data);
+}
+
+export function parseContentErrorResponse(value: unknown, id: string): ContentErrorData | null {
+  if (!isRecord(value) || value.id !== id || value.ok !== false || !isRecord(value.error)) {
+    return null;
+  }
+  if (
+    !hasOnlyKeys(value.error, ["code", "message", "retryable"]) ||
+    typeof value.error.code !== "string" ||
+    value.error.code.length === 0 ||
+    value.error.code.length > 80 ||
+    typeof value.error.message !== "string" ||
+    value.error.message.length === 0 ||
+    value.error.message.length > 500 ||
+    typeof value.error.retryable !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    code: value.error.code,
+    message: value.error.message,
+    retryable: value.error.retryable,
+  };
 }
 
 export function parsePingResponse(value: unknown, id: string): boolean {

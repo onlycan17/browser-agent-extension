@@ -4,8 +4,28 @@ import type { ToolCall, ToolDefinition, ToolMessage } from "../shared/llm";
 import type { ObservedElement, PageSnapshot } from "../shared/page";
 import { ApprovalManager } from "./approval-manager";
 import { SafetyPolicy, type ActionProposal, type SafetyDecision } from "./safety-policy";
+import { PageActionError } from "./tab-service";
 
 export const AGENT_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "summarize_video_transcript",
+      description:
+        "Summarize an opened transcript in bounded chunks and hierarchically merge the results. Use this for a long or full-video transcript instead of manually scrolling through transcript text.",
+      parameters: {
+        type: "object",
+        properties: {
+          focus: {
+            type: "string",
+            maxLength: 500,
+            description: "Optional emphasis from the user's request.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -36,6 +56,61 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           replace: { type: "boolean" },
         },
         required: ["generation", "elementId", "text", "replace"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "select_option",
+      description:
+        "Select one option by its exact observed label from a select element in the latest page observation.",
+      parameters: {
+        type: "object",
+        properties: {
+          generation: { type: "integer" },
+          elementId: { type: "string" },
+          optionLabel: { type: "string", maxLength: 300 },
+        },
+        required: ["generation", "elementId", "optionLabel"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_checked",
+      description:
+        "Set an observed checkbox state, or select an observed radio option with checked=true.",
+      parameters: {
+        type: "object",
+        properties: {
+          generation: { type: "integer" },
+          elementId: { type: "string" },
+          checked: { type: "boolean" },
+        },
+        required: ["generation", "elementId", "checked"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "scroll_element",
+      description:
+        "Scroll an observed nested container, such as a modal, list, menu, or grid, by a bounded pixel amount.",
+      parameters: {
+        type: "object",
+        properties: {
+          generation: { type: "integer" },
+          elementId: { type: "string" },
+          direction: { type: "string", enum: ["up", "down", "left", "right"] },
+          amount: { type: "integer", minimum: 1, maximum: 2000 },
+        },
+        required: ["generation", "elementId", "direction", "amount"],
         additionalProperties: false,
       },
     },
@@ -108,6 +183,15 @@ export function agentTools(allowScreenshots: boolean): ToolDefinition[] {
 type ParsedTool =
   | { name: "click_element"; generation: number; elementId: string }
   | { name: "type_text"; generation: number; elementId: string; text: string; replace: boolean }
+  | { name: "select_option"; generation: number; elementId: string; optionLabel: string }
+  | { name: "set_checked"; generation: number; elementId: string; checked: boolean }
+  | {
+      name: "scroll_element";
+      generation: number;
+      elementId: string;
+      direction: "up" | "down" | "left" | "right";
+      amount: number;
+    }
   | { name: "press_key"; key: (typeof ALLOWED_KEYS)[number] }
   | { name: "scroll_page"; direction: "up" | "down" | "left" | "right"; amount: number }
   | { name: "youtube_control"; action: "play" | "pause" }
@@ -121,6 +205,7 @@ export interface ToolExecutionResult {
   message: ToolMessage;
   failed: boolean;
   signature: string;
+  retryableFailure?: boolean;
 }
 
 interface ActionService {
@@ -143,7 +228,15 @@ function parseTarget(
   name: "click_element" | "type_text",
   value: Record<string, unknown>,
 ): ParsedTool | null {
-  if (!Number.isInteger(value.generation) || typeof value.elementId !== "string") return null;
+  if (
+    !Number.isInteger(value.generation) ||
+    Number(value.generation) < 1 ||
+    typeof value.elementId !== "string" ||
+    value.elementId.length === 0 ||
+    value.elementId.length > 80
+  ) {
+    return null;
+  }
   const generation = Number(value.generation);
   const elementId = value.elementId;
   if (name === "click_element" && hasOnlyKeys(value, ["generation", "elementId"])) {
@@ -158,6 +251,49 @@ function parseTarget(
   )
     return null;
   return { name: "type_text", generation, elementId, text: value.text, replace: value.replace };
+}
+
+function parseGuardedElementTool(
+  name: "select_option" | "set_checked" | "scroll_element",
+  value: Record<string, unknown>,
+): ParsedTool | null {
+  if (
+    !Number.isInteger(value.generation) ||
+    Number(value.generation) < 1 ||
+    typeof value.elementId !== "string" ||
+    value.elementId.length === 0 ||
+    value.elementId.length > 80
+  ) {
+    return null;
+  }
+  const generation = Number(value.generation);
+  const elementId = value.elementId;
+  if (name === "select_option") {
+    if (!hasOnlyKeys(value, ["generation", "elementId", "optionLabel"])) return null;
+    if (
+      typeof value.optionLabel !== "string" ||
+      value.optionLabel.length === 0 ||
+      value.optionLabel.length > 300
+    ) {
+      return null;
+    }
+    return { name, generation, elementId, optionLabel: value.optionLabel };
+  }
+  if (name === "set_checked") {
+    if (
+      !hasOnlyKeys(value, ["generation", "elementId", "checked"]) ||
+      typeof value.checked !== "boolean"
+    ) {
+      return null;
+    }
+    return { name, generation, elementId, checked: value.checked };
+  }
+  if (!hasOnlyKeys(value, ["generation", "elementId", "direction", "amount"])) return null;
+  const directions = ["up", "down", "left", "right"] as const;
+  const direction = directions.find((item) => item === value.direction);
+  if (direction === undefined || !Number.isInteger(value.amount)) return null;
+  const amount = Number(value.amount);
+  return amount < 1 || amount > 2000 ? null : { name, generation, elementId, direction, amount };
 }
 
 function parseYouTubeTool(value: Record<string, unknown>): ParsedTool | null {
@@ -184,6 +320,19 @@ export function isCaptureScreenCall(call: ToolCall): boolean {
   }
 }
 
+export function parseTranscriptSummaryCall(call: ToolCall): { focus: string } | null {
+  if (call.function.name !== "summarize_video_transcript") return null;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    if (!isRecord(value) || !hasOnlyKeys(value, ["focus"])) return null;
+    if (value.focus === undefined) return { focus: "" };
+    if (typeof value.focus !== "string" || value.focus.length > 500) return null;
+    return { focus: value.focus.trim() };
+  } catch {
+    return null;
+  }
+}
+
 function parseTool(call: ToolCall): ParsedTool | null {
   let value: unknown;
   try {
@@ -194,6 +343,13 @@ function parseTool(call: ToolCall): ParsedTool | null {
   if (!isRecord(value)) return null;
   if (call.function.name === "click_element" || call.function.name === "type_text") {
     return parseTarget(call.function.name, value);
+  }
+  if (
+    call.function.name === "select_option" ||
+    call.function.name === "set_checked" ||
+    call.function.name === "scroll_element"
+  ) {
+    return parseGuardedElementTool(call.function.name, value);
   }
   if (call.function.name === "press_key" && hasOnlyKeys(value, ["key"])) {
     const key = ALLOWED_KEYS.find((item) => item === value.key);
@@ -220,6 +376,9 @@ function actionProposal(tool: ParsedTool, snapshot: PageSnapshot): ActionProposa
   if (tool.name === "press_key") return { action: "press_key", key: tool.key };
   const element = observedElement(tool, snapshot);
   if (element === null) return null;
+  if (tool.name === "select_option") return { action: "select_option", element };
+  if (tool.name === "set_checked") return { action: "set_checked", element };
+  if (tool.name === "scroll_element") return { action: "scroll_element", element };
   return tool.name === "click_element"
     ? { action: "click", element, pageUrl: snapshot.url }
     : { action: "type_text", element };
@@ -241,6 +400,43 @@ function pageAction(tool: ParsedTool, element: ObservedElement | null): PageActi
       payload: { generation, elementId, text, replace, expected: element },
     };
   }
+  if (tool.name === "select_option") {
+    if (element === null) throw new Error("Observed element is required.");
+    return {
+      type: "PAGE_SELECT_OPTION",
+      payload: {
+        generation: tool.generation,
+        elementId: tool.elementId,
+        optionLabel: tool.optionLabel,
+        expected: element,
+      },
+    };
+  }
+  if (tool.name === "set_checked") {
+    if (element === null) throw new Error("Observed element is required.");
+    return {
+      type: "PAGE_SET_CHECKED",
+      payload: {
+        generation: tool.generation,
+        elementId: tool.elementId,
+        checked: tool.checked,
+        expected: element,
+      },
+    };
+  }
+  if (tool.name === "scroll_element") {
+    if (element === null) throw new Error("Observed element is required.");
+    return {
+      type: "PAGE_SCROLL_ELEMENT",
+      payload: {
+        generation: tool.generation,
+        elementId: tool.elementId,
+        direction: tool.direction,
+        amount: tool.amount,
+        expected: element,
+      },
+    };
+  }
   if (tool.name === "press_key") return { type: "PAGE_PRESS_KEY", payload: { key: tool.key } };
   if (tool.name === "youtube_control") {
     return "value" in tool
@@ -255,6 +451,12 @@ function signature(tool: ParsedTool): string {
     return `${tool.name}:${String(tool.generation)}:${tool.elementId}:${String(tool.replace)}`;
   if (tool.name === "click_element")
     return `${tool.name}:${String(tool.generation)}:${tool.elementId}`;
+  if (tool.name === "select_option")
+    return `${tool.name}:${String(tool.generation)}:${tool.elementId}:${textFingerprint(tool.optionLabel)}`;
+  if (tool.name === "set_checked")
+    return `${tool.name}:${String(tool.generation)}:${tool.elementId}:${String(tool.checked)}`;
+  if (tool.name === "scroll_element")
+    return `${tool.name}:${String(tool.generation)}:${tool.elementId}:${tool.direction}:${String(tool.amount)}`;
   if (tool.name === "press_key") return `${tool.name}:${tool.key}`;
   if (tool.name === "youtube_control") {
     return "value" in tool
@@ -266,6 +468,8 @@ function signature(tool: ParsedTool): string {
 
 export function toolCallSignature(call: ToolCall): string {
   if (isCaptureScreenCall(call)) return "capture_screen";
+  const transcript = parseTranscriptSummaryCall(call);
+  if (transcript !== null) return `summarize_video_transcript:${textFingerprint(transcript.focus)}`;
   const tool = parseTool(call);
   return tool === null ? `invalid:${call.function.name}` : signature(tool);
 }
@@ -280,6 +484,8 @@ function textFingerprint(value: string): string {
 
 export function toolCallProgressSignature(call: ToolCall): string {
   if (isCaptureScreenCall(call)) return "capture_screen";
+  const transcript = parseTranscriptSummaryCall(call);
+  if (transcript !== null) return `summarize_video_transcript:${textFingerprint(transcript.focus)}`;
   const tool = parseTool(call);
   if (tool === null)
     return `invalid:${call.function.name}:${textFingerprint(call.function.arguments)}`;
@@ -289,7 +495,12 @@ export function toolCallProgressSignature(call: ToolCall): string {
 
 export function toolCallMayNavigate(call: ToolCall): boolean {
   const tool = parseTool(call);
-  return tool?.name === "click_element" || (tool?.name === "press_key" && tool.key === "Enter");
+  return (
+    tool?.name === "click_element" ||
+    tool?.name === "select_option" ||
+    tool?.name === "set_checked" ||
+    (tool?.name === "press_key" && tool.key === "Enter")
+  );
 }
 
 function toolMessage(callId: string, value: Record<string, unknown>): ToolMessage {
@@ -304,6 +515,8 @@ function approvalCopy(
     [element?.name, element?.role].find((value) => value !== undefined && value.length > 0) ??
     "현재 요소";
   if (tool.name === "click_element") return { title: "클릭 승인 필요", detail: target };
+  if (tool.name === "select_option") return { title: "선택 변경 승인 필요", detail: target };
+  if (tool.name === "set_checked") return { title: "체크 상태 변경 승인 필요", detail: target };
   if (tool.name === "press_key") return { title: "키 입력 승인 필요", detail: tool.key };
   return { title: "작업 승인 필요", detail: target };
 }
@@ -344,7 +557,10 @@ export class AgentToolExecutor {
         failed: false,
         signature: signature(tool),
       };
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof PageActionError) {
+        return this.failure(call.id, error.message, signature(tool), error.code, error.retryable);
+      }
       return this.failure(call.id, "The page rejected this action.", signature(tool));
     }
   }
@@ -374,11 +590,23 @@ export class AgentToolExecutor {
     return decisionPromise;
   }
 
-  private failure(callId: string, message: string, toolSignature: string): ToolExecutionResult {
+  private failure(
+    callId: string,
+    message: string,
+    toolSignature: string,
+    code?: string,
+    retryable = false,
+  ): ToolExecutionResult {
     return {
-      message: toolMessage(callId, { ok: false, error: message }),
+      message: toolMessage(callId, {
+        ok: false,
+        ...(code === undefined ? {} : { code }),
+        error: message,
+        ...(code === undefined ? {} : { retryable }),
+      }),
       failed: true,
       signature: toolSignature,
+      ...(retryable ? { retryableFailure: true } : {}),
     };
   }
 }

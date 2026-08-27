@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseContentRequest } from "../src/shared/content-messages";
+import {
+  parseContentErrorResponse,
+  parseContentRequest,
+  parseTranscriptChunkResponse,
+} from "../src/shared/content-messages";
 
 const expected = {
   id: "e-1-1",
@@ -80,6 +84,142 @@ describe("content message parser", () => {
         type: "PAGE_CLICK",
         payload: { generation: 1, elementId: "e-1-1", expected: { ...expected, value: "secret" } },
       }),
+    ).toBeNull();
+  });
+
+  it("accepts only guarded form and nested-scroll actions", () => {
+    const select = {
+      ...expected,
+      tag: "select",
+      role: "combobox",
+      name: "Region",
+      options: [
+        { label: "Seoul", selected: true, disabled: false },
+        { label: "Busan", selected: false, disabled: false },
+      ],
+    };
+    expect(
+      parseContentRequest({
+        id: "select-1",
+        type: "PAGE_SELECT_OPTION",
+        payload: {
+          generation: 1,
+          elementId: "e-1-1",
+          optionLabel: "Busan",
+          expected: select,
+        },
+      }),
+    ).toMatchObject({ type: "PAGE_SELECT_OPTION", payload: { optionLabel: "Busan" } });
+    expect(
+      parseContentRequest({
+        id: "check-1",
+        type: "PAGE_SET_CHECKED",
+        payload: { generation: 1, elementId: "e-1-1", checked: true, expected },
+      }),
+    ).toMatchObject({ type: "PAGE_SET_CHECKED", payload: { checked: true } });
+    expect(
+      parseContentRequest({
+        id: "scroll-1",
+        type: "PAGE_SCROLL_ELEMENT",
+        payload: {
+          generation: 1,
+          elementId: "e-1-1",
+          direction: "down",
+          amount: 500,
+          expected,
+        },
+      }),
+    ).toMatchObject({ type: "PAGE_SCROLL_ELEMENT", payload: { amount: 500 } });
+    expect(
+      parseContentRequest({
+        id: "select-unsafe",
+        type: "PAGE_SELECT_OPTION",
+        payload: {
+          generation: 1,
+          elementId: "e-1-1",
+          optionLabel: "x".repeat(301),
+          expected: select,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("preserves a validated structured content error", () => {
+    expect(
+      parseContentErrorResponse(
+        {
+          id: "action-1",
+          ok: false,
+          error: {
+            code: "STALE_ELEMENT",
+            message: "The page changed; observe it again.",
+            retryable: true,
+          },
+        },
+        "action-1",
+      ),
+    ).toEqual({
+      code: "STALE_ELEMENT",
+      message: "The page changed; observe it again.",
+      retryable: true,
+    });
+    expect(
+      parseContentErrorResponse(
+        {
+          id: "action-1",
+          ok: false,
+          error: { code: "STALE_ELEMENT", message: "x".repeat(501), retryable: true },
+        },
+        "action-1",
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts a bounded transcript chunk request", () => {
+    expect(
+      parseContentRequest({
+        id: "transcript-1",
+        type: "TRANSCRIPT_READ_CHUNK",
+        payload: { cursor: 12, maxChars: 8_000 },
+      }),
+    ).toEqual({
+      id: "transcript-1",
+      type: "TRANSCRIPT_READ_CHUNK",
+      payload: { cursor: 12, maxChars: 8_000 },
+    });
+    expect(
+      parseContentRequest({
+        id: "transcript-2",
+        type: "TRANSCRIPT_READ_CHUNK",
+        payload: { cursor: -1, maxChars: 8_000 },
+      }),
+    ).toBeNull();
+  });
+
+  it("validates transcript chunk responses before they reach the background", () => {
+    const response = {
+      id: "transcript-1",
+      ok: true,
+      data: {
+        available: true,
+        cursor: 0,
+        nextCursor: 2,
+        done: false,
+        startTime: "00:00",
+        endTime: "00:30",
+        contextText: "",
+        text: "[00:00] Intro\n[00:30] Topic",
+        segmentCount: 2,
+        totalSegments: 3,
+      },
+    };
+
+    expect(parseTranscriptChunkResponse(response, "transcript-1")).toEqual(response.data);
+    expect(
+      parseTranscriptChunkResponse(
+        { ...response, data: { ...response.data, text: "x".repeat(8_001) } },
+        "transcript-1",
+      ),
     ).toBeNull();
   });
 });

@@ -116,4 +116,14 @@ describe("SafetyPolicy", () => {
   it("requires confirmation before Enter", () => {
     expect(policy.evaluate({ action: "press_key", key: "Enter" }).outcome).toBe("confirm");
   });
+
+  it("requires confirmation for form selection changes but allows nested scrolling", () => {
+    expect(policy.evaluate({ action: "select_option", element: element() }).outcome).toBe(
+      "confirm",
+    );
+    expect(policy.evaluate({ action: "set_checked", element: element() }).outcome).toBe("confirm");
+    expect(policy.evaluate({ action: "scroll_element", element: element() })).toEqual({
+      outcome: "allow",
+    });
+  });
 });

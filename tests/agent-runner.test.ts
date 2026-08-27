@@ -52,6 +52,14 @@ const captureCall: ToolCall = {
   type: "function",
   function: { name: "capture_screen", arguments: "{}" },
 };
+const transcriptSummaryCall: ToolCall = {
+  id: "call-transcript-summary",
+  type: "function",
+  function: {
+    name: "summarize_video_transcript",
+    arguments: '{"focus":"핵심 논지와 결론"}',
+  },
+};
 
 function tabs() {
   return {
@@ -167,6 +175,8 @@ describe("AgentRunner", () => {
     expect(systemPrompt).toContain("<video_transcript_guidance>");
     expect(systemPrompt).toContain("use a full transcript already present");
     expect(systemPrompt).toContain("More > Show transcript");
+    expect(systemPrompt).toContain("More (더보기) > Show transcript (스크립트 표시)");
+    expect(systemPrompt).toContain("right side of the video");
     expect(systemPrompt).toContain(
       "If the refreshed observation has no transcript control, stop discovery immediately",
     );
@@ -174,10 +184,65 @@ describe("AgentRunner", () => {
     expect(systemPrompt).toContain("re-observe");
     expect(systemPrompt).toContain("at most two control actions");
     expect(systemPrompt).toContain("Do not guess selectors");
+    expect(systemPrompt).toContain("summarize_video_transcript");
+    expect(systemPrompt).toContain("Do not manually scroll through a long transcript");
     expect(systemPrompt).not.toContain("or Captions");
     expect(JSON.stringify(requestBody?.messages.slice(1))).not.toContain(
       "<video_transcript_guidance>",
     );
+  });
+
+  it("returns a hierarchical transcript summary to the main agent without page actions", async () => {
+    const requests: ChatRequest[] = [];
+    const events: AgentEvent[] = [];
+    let completion = 0;
+    const execute = vi.fn(successfulTool().execute);
+    const summarize = vi.fn(() =>
+      Promise.resolve({
+        summary: "[00:00–42:00] 전체 영상 요약",
+        chunks: 6,
+        startTime: "00:00",
+        endTime: "42:00",
+        truncated: false,
+      }),
+    );
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          requests.push(request);
+          completion += 1;
+          return Promise.resolve(
+            completion === 1
+              ? { role: "assistant" as const, content: null, tool_calls: [transcriptSummaryCall] }
+              : { role: "assistant" as const, content: "사용자에게 전달할 최종 요약" },
+          );
+        },
+      },
+      { execute },
+      new ApprovalManager(),
+      (event) => events.push(event),
+      { summarize },
+    );
+
+    const result = await runner.run("run-long-transcript", "긴 영상 전체를 정리해줘", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "사용자에게 전달할 최종 요약" });
+    expect(summarize).toHaveBeenCalledWith(
+      settings,
+      "run-long-transcript",
+      "핵심 논지와 결론",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(requests[1]?.messages)).toContain("전체 영상 요약");
+    expect(
+      events.some(
+        (event) => event.type === "AGENT_PROGRESS" && event.payload.code === "TRANSCRIPT",
+      ),
+    ).toBe(true);
   });
 
   it("includes attachments without granting autonomous screenshot access", async () => {
@@ -957,6 +1022,7 @@ describe("AgentRunner", () => {
       },
       new ApprovalManager(),
       () => undefined,
+      undefined,
       () => elapsed,
     );
 

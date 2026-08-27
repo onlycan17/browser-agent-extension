@@ -24,10 +24,26 @@ function register(element: HTMLElement) {
 
 function guard(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  const scrollableX =
+    /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+  const scrollableY =
+    /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+  const role =
+    element instanceof HTMLButtonElement
+      ? "button"
+      : element instanceof HTMLSelectElement
+        ? "combobox"
+        : element instanceof HTMLInputElement &&
+            (element.type === "checkbox" || element.type === "radio")
+          ? element.type
+          : element.tagName.toLowerCase() === "section"
+            ? "section"
+            : "textbox";
   return {
     id: "e-1-1",
     tag: element.tagName.toLowerCase(),
-    role: element instanceof HTMLButtonElement ? "button" : "textbox",
+    role,
     name: element.getAttribute("aria-label") ?? element.textContent,
     disabled: "disabled" in element && element.disabled === true,
     bounds: {
@@ -36,16 +52,36 @@ function guard(element: HTMLElement) {
       width: rect.width,
       height: rect.height,
     },
-    ...(element instanceof HTMLInputElement ? { inputType: element.type } : {}),
+    ...(element instanceof HTMLInputElement || element instanceof HTMLButtonElement
+      ? { inputType: element.type }
+      : {}),
     ...(element.getAttribute("autocomplete") !== null
       ? { autocomplete: element.getAttribute("autocomplete") ?? "" }
       : {}),
+    ...(element instanceof HTMLInputElement &&
+    (element.type === "checkbox" || element.type === "radio")
+      ? { checked: element.checked }
+      : {}),
+    ...(element instanceof HTMLSelectElement
+      ? {
+          options: Array.from(element.options)
+            .slice(0, 50)
+            .map((option) => ({
+              label: option.label,
+              selected: option.selected,
+              disabled: option.disabled,
+            })),
+        }
+      : {}),
+    ...(scrollableX ? { scrollableX: true } : {}),
+    ...(scrollableY ? { scrollableY: true } : {}),
   };
 }
 
 describe("PageActionExecutor", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    Reflect.deleteProperty(document, "elementFromPoint");
   });
 
   it("uses the native setter and emits input events", () => {
@@ -212,5 +248,105 @@ describe("PageActionExecutor", () => {
     expect(() => executor.typeText(generation + 1, elementId, "text", true, guard(input))).toThrow(
       new ActionExecutionError("STALE_ELEMENT", "The page changed; observe it again."),
     );
+  });
+
+  it("rejects a target covered after observation", () => {
+    const button = document.createElement("button");
+    button.textContent = "Continue";
+    const overlay = document.createElement("div");
+    const clicked = vi.fn();
+    button.addEventListener("click", clicked);
+    const { executor, generation, elementId } = register(button);
+    document.body.append(overlay);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => overlay,
+    });
+
+    expect(() => executor.click(generation, elementId, guard(button))).toThrow(
+      new ActionExecutionError("ELEMENT_OCCLUDED", "Another element is covering the target."),
+    );
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it("selects an option by observed label without accepting a raw selector", () => {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Region");
+    select.append(new Option("Seoul", "internal-1", true, true));
+    select.append(new Option("Busan", "internal-2"));
+    const events: string[] = [];
+    select.addEventListener("input", () => events.push("input"));
+    select.addEventListener("change", () => events.push("change"));
+    const { executor, generation, elementId } = register(select);
+
+    executor.selectOption(generation, elementId, "Busan", guard(select));
+
+    expect(select.selectedOptions[0]?.label).toBe("Busan");
+    expect(events).toEqual(["input", "change"]);
+    expect(() => executor.selectOption(generation, elementId, "Missing", guard(select))).toThrow(
+      new ActionExecutionError("ELEMENT_NOT_FOUND", "The requested option is unavailable."),
+    );
+  });
+
+  it("rejects a select option that was outside the bounded observation", () => {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Large option list");
+    for (let index = 0; index < 51; index += 1) {
+      select.append(new Option(`Option ${String(index + 1)}`, `internal-${String(index + 1)}`));
+    }
+    const { executor, generation, elementId } = register(select);
+
+    expect(() => executor.selectOption(generation, elementId, "Option 51", guard(select))).toThrow(
+      new ActionExecutionError("ELEMENT_NOT_FOUND", "The requested option is unavailable."),
+    );
+  });
+
+  it("sets checkbox state and rejects clearing a radio button", () => {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.setAttribute("aria-label", "Newsletter");
+    const changes: string[] = [];
+    checkbox.addEventListener("change", () => changes.push("change"));
+    const registered = register(checkbox);
+
+    registered.executor.setChecked(
+      registered.generation,
+      registered.elementId,
+      true,
+      guard(checkbox),
+    );
+
+    expect(checkbox.checked).toBe(true);
+    expect(changes).toEqual(["change"]);
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.checked = true;
+    const radioRegistration = register(radio);
+    expect(() =>
+      radioRegistration.executor.setChecked(
+        radioRegistration.generation,
+        radioRegistration.elementId,
+        false,
+        guard(radio),
+      ),
+    ).toThrow(new ActionExecutionError("UNSAFE_ACTION", "A radio option cannot be cleared."));
+  });
+
+  it("scrolls a guarded nested container without smooth-scroll races", () => {
+    const scroller = document.createElement("section");
+    scroller.setAttribute("aria-label", "Results");
+    scroller.style.overflowY = "auto";
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+    });
+    const scrollBy = vi.fn();
+    scroller.scrollBy = scrollBy;
+    const { executor, generation, elementId } = register(scroller);
+
+    executor.scrollElement(generation, elementId, "down", 400, guard(scroller));
+
+    expect(scrollBy).toHaveBeenCalledWith({ top: 400, left: 0, behavior: "auto" });
   });
 });
