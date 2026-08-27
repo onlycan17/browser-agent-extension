@@ -8,6 +8,7 @@ import {
 interface TranscriptSegment {
   timestamp: string;
   text: string;
+  key: string;
 }
 
 const SEGMENT_SELECTOR = [
@@ -54,6 +55,14 @@ function validTimestamp(value: string): boolean {
   return /^(?:\d{1,3}:)?\d{1,2}:\d{2}$/.test(value);
 }
 
+function segmentKey(value: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16_777_619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function splitSegmentText(value: string): string[] {
   if (value.length <= MAX_SEGMENT_TEXT_CHARS) return [value];
   const parts: string[] = [];
@@ -71,16 +80,18 @@ function splitSegmentText(value: string): string[] {
 
 function transcriptSegments(document: Document): TranscriptSegment[] {
   const segments: TranscriptSegment[] = [];
-  let previous = "";
+  const seen = new Set<string>();
   for (const candidate of document.querySelectorAll<HTMLElement>(SEGMENT_SELECTOR)) {
     if (!isRendered(candidate)) continue;
     const timestamp = compactText(candidate.querySelector(TIMESTAMP_SELECTOR)?.textContent);
     const text = compactText(candidate.querySelector(TEXT_SELECTOR)?.textContent);
     if (!validTimestamp(timestamp) || text.length === 0) continue;
     const signature = `${timestamp}\n${text}`;
-    if (signature === previous) continue;
-    previous = signature;
-    for (const part of splitSegmentText(text)) segments.push({ timestamp, text: part });
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    for (const [index, part] of splitSegmentText(text).entries()) {
+      segments.push({ timestamp, text: part, key: segmentKey(`${signature}\n${String(index)}`) });
+    }
   }
   return segments;
 }
@@ -94,16 +105,33 @@ function contextText(segments: readonly TranscriptSegment[], cursor: number): st
   return segments.slice(start, cursor).map(line).join("\n").slice(-TRANSCRIPT_CONTEXT_MAX_CHARS);
 }
 
+function anchoredCursor(
+  segments: readonly TranscriptSegment[],
+  cursor: number,
+  afterSegmentKey: string,
+): number | null {
+  if (afterSegmentKey.length === 0) return cursor;
+  const anchor = segments.findIndex((segment) => segment.key === afterSegmentKey);
+  return anchor < 0 ? null : anchor + 1;
+}
+
 export function readTranscriptChunk(
   document: Document,
   cursor: number,
   maxChars: number,
+  afterSegmentKey = "",
 ): TranscriptChunkResult {
   const segments = transcriptSegments(document);
   if (segments.length === 0) {
     return { available: false, reason: "No opened transcript segments were found." };
   }
-  if (!Number.isInteger(cursor) || cursor < 0 || cursor >= segments.length) {
+  const startCursor = anchoredCursor(segments, cursor, afterSegmentKey);
+  if (
+    startCursor === null ||
+    !Number.isInteger(startCursor) ||
+    startCursor < 0 ||
+    startCursor >= segments.length
+  ) {
     return { available: false, reason: "The transcript cursor is no longer available." };
   }
   const limit = Math.min(
@@ -112,7 +140,7 @@ export function readTranscriptChunk(
   );
   const lines: string[] = [];
   let length = 0;
-  let nextCursor = cursor;
+  let nextCursor = startCursor;
   while (nextCursor < segments.length) {
     const segment = segments[nextCursor];
     if (segment === undefined) break;
@@ -123,21 +151,42 @@ export function readTranscriptChunk(
     length += separatorLength + nextLine.length;
     nextCursor += 1;
   }
-  const first = segments[cursor];
+  const first = segments[startCursor];
   const last = segments[nextCursor - 1];
   if (first === undefined || last === undefined) {
     return { available: false, reason: "The transcript chunk could not be created." };
   }
   return {
     available: true,
-    cursor,
+    cursor: startCursor,
     nextCursor,
     done: nextCursor === segments.length,
     startTime: first.timestamp,
     endTime: last.timestamp,
-    contextText: contextText(segments, cursor),
+    contextText: contextText(segments, startCursor),
     text: lines.join("\n"),
-    segmentCount: nextCursor - cursor,
+    segmentCount: nextCursor - startCursor,
     totalSegments: segments.length,
+    lastSegmentKey: last.key,
+  };
+}
+
+export async function readStableTranscriptChunk(
+  document: Document,
+  cursor: number,
+  maxChars: number,
+  afterSegmentKey: string,
+  settle: () => Promise<boolean>,
+): Promise<TranscriptChunkResult> {
+  const chunk = readTranscriptChunk(document, cursor, maxChars, afterSegmentKey);
+  if (!chunk.available || !chunk.done) return chunk;
+  const settled = await settle();
+  if (!settled) return { ...chunk, done: false };
+  const later = readTranscriptChunk(document, chunk.nextCursor, maxChars, chunk.lastSegmentKey);
+  if (!later.available) return chunk;
+  return {
+    ...chunk,
+    done: false,
+    totalSegments: Math.max(chunk.totalSegments, later.totalSegments),
   };
 }

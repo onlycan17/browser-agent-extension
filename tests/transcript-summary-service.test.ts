@@ -31,6 +31,7 @@ function chunk(
     text,
     segmentCount: 1,
     totalSegments,
+    lastSegmentKey: `segment-${String(cursor)}`,
   };
 }
 
@@ -87,6 +88,7 @@ describe("TranscriptSummaryService", () => {
       "run-1",
       0,
       8_000,
+      "",
       expect.any(AbortSignal),
     );
     expect(readTranscriptChunk).toHaveBeenNthCalledWith(
@@ -94,6 +96,7 @@ describe("TranscriptSummaryService", () => {
       "run-1",
       1,
       8_000,
+      "segment-0",
       expect.any(AbortSignal),
     );
     expect(progress).toHaveBeenNthCalledWith(1, 1, 2);
@@ -127,6 +130,35 @@ describe("TranscriptSummaryService", () => {
     expect(requestKinds.filter((kind) => kind === "chunk")).toHaveLength(7);
     expect(requestKinds.filter((kind) => kind === "merge")).toHaveLength(2);
     expect(requestKinds.at(-1)).toBe("final");
+  });
+
+  it("marks a partial summary when continuation becomes unavailable", async () => {
+    const readTranscriptChunk = vi
+      .fn()
+      .mockResolvedValueOnce(chunk(0, "[00:00] unstable end", false, 1))
+      .mockResolvedValueOnce({
+        available: false as const,
+        reason: "The transcript cursor is no longer available.",
+      });
+    const complete = vi.fn((_settings, request: ChatRequest) =>
+      Promise.resolve({
+        role: "assistant" as const,
+        content: systemText(request).includes("one transcript chunk")
+          ? "확인된 구간 요약"
+          : "부분 영상 요약",
+      }),
+    );
+    const service = new TranscriptSummaryService({ readTranscriptChunk }, { complete });
+
+    const result = await service.summarize(
+      settings,
+      "run-unstable-end",
+      "",
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ chunks: 1, truncated: true, summary: "부분 영상 요약" });
+    expect(readTranscriptChunk).toHaveBeenCalledTimes(2);
   });
 
   it("fails clearly when an opened transcript is unavailable", async () => {

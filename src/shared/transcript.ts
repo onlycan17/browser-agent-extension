@@ -4,10 +4,12 @@ export const TRANSCRIPT_CONTEXT_MAX_CHARS = 2_000;
 const MAX_TRANSCRIPT_SEGMENTS = 100_000;
 const MAX_TIMESTAMP_CHARS = 32;
 const MAX_UNAVAILABLE_REASON_CHARS = 200;
+const MAX_SEGMENT_KEY_CHARS = 64;
 
 export interface TranscriptChunkRequest {
   cursor: number;
   maxChars: number;
+  afterSegmentKey: string;
 }
 
 export type TranscriptChunkResult =
@@ -23,6 +25,7 @@ export type TranscriptChunkResult =
       text: string;
       segmentCount: number;
       totalSegments: number;
+      lastSegmentKey: string;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,14 +43,25 @@ function boundedInteger(value: unknown, minimum: number, maximum: number): numbe
 }
 
 export function parseTranscriptChunkRequest(value: unknown): TranscriptChunkRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["cursor", "maxChars"])) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, ["cursor", "maxChars", "afterSegmentKey"])) {
+    return null;
+  }
   const cursor = boundedInteger(value.cursor, 0, MAX_TRANSCRIPT_SEGMENTS - 1);
   const maxChars = boundedInteger(
     value.maxChars,
     TRANSCRIPT_CHUNK_MIN_CHARS,
     TRANSCRIPT_CHUNK_MAX_CHARS,
   );
-  return cursor === null || maxChars === null ? null : { cursor, maxChars };
+  const afterSegmentKey = value.afterSegmentKey;
+  if (
+    cursor === null ||
+    maxChars === null ||
+    typeof afterSegmentKey !== "string" ||
+    afterSegmentKey.length > MAX_SEGMENT_KEY_CHARS
+  ) {
+    return null;
+  }
+  return { cursor, maxChars, afterSegmentKey };
 }
 
 function parseUnavailableChunk(value: Record<string, unknown>): TranscriptChunkResult | null {
@@ -76,10 +90,19 @@ function parseAvailableChunk(value: Record<string, unknown>): TranscriptChunkRes
     "text",
     "segmentCount",
     "totalSegments",
+    "lastSegmentKey",
   ];
   if (!hasOnlyKeys(value, keys) || typeof value.done !== "boolean") return null;
   if (!validTimestamp(value.startTime) || !validTimestamp(value.endTime)) return null;
-  if (typeof value.contextText !== "string" || typeof value.text !== "string") return null;
+  if (
+    typeof value.contextText !== "string" ||
+    typeof value.text !== "string" ||
+    typeof value.lastSegmentKey !== "string" ||
+    value.lastSegmentKey.length === 0 ||
+    value.lastSegmentKey.length > MAX_SEGMENT_KEY_CHARS
+  ) {
+    return null;
+  }
   if (
     value.contextText.length > TRANSCRIPT_CONTEXT_MAX_CHARS ||
     value.text.length === 0 ||
@@ -113,6 +136,7 @@ function parseAvailableChunk(value: Record<string, unknown>): TranscriptChunkRes
     text: value.text,
     segmentCount,
     totalSegments,
+    lastSegmentKey: value.lastSegmentKey,
   };
 }
 

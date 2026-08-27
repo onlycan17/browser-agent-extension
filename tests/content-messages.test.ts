@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseActionResponse,
   parseContentErrorResponse,
   parseContentRequest,
   parseTranscriptChunkResponse,
@@ -144,6 +145,15 @@ describe("content message parser", () => {
     ).toBeNull();
   });
 
+  it("preserves page settlement status on successful actions", () => {
+    expect(
+      parseActionResponse(
+        { id: "action-1", ok: true, data: { message: "Clicked.", pageSettled: false } },
+        "action-1",
+      ),
+    ).toEqual({ message: "Clicked.", pageSettled: false });
+  });
+
   it("preserves a validated structured content error", () => {
     expect(
       parseContentErrorResponse(
@@ -180,12 +190,12 @@ describe("content message parser", () => {
       parseContentRequest({
         id: "transcript-1",
         type: "TRANSCRIPT_READ_CHUNK",
-        payload: { cursor: 12, maxChars: 8_000 },
+        payload: { cursor: 12, maxChars: 8_000, afterSegmentKey: "12ab34cd" },
       }),
     ).toEqual({
       id: "transcript-1",
       type: "TRANSCRIPT_READ_CHUNK",
-      payload: { cursor: 12, maxChars: 8_000 },
+      payload: { cursor: 12, maxChars: 8_000, afterSegmentKey: "12ab34cd" },
     });
     expect(
       parseContentRequest({
@@ -211,6 +221,7 @@ describe("content message parser", () => {
         text: "[00:00] Intro\n[00:30] Topic",
         segmentCount: 2,
         totalSegments: 3,
+        lastSegmentKey: "12ab34cd",
       },
     };
 

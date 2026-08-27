@@ -131,6 +131,7 @@ describe("TabService", () => {
           text: "[00:00] Intro\n[00:30] End",
           segmentCount: 2,
           totalSegments: 2,
+          lastSegmentKey: "final-segment",
         },
       });
     });
@@ -138,13 +139,13 @@ describe("TabService", () => {
     await service.pinActivePage("run-transcript");
 
     await expect(
-      service.readTranscriptChunk("run-transcript", 0, 8_000, new AbortController().signal),
+      service.readTranscriptChunk("run-transcript", 0, 8_000, "", new AbortController().signal),
     ).resolves.toMatchObject({ available: true, done: true, segmentCount: 2 });
     expect(send).toHaveBeenLastCalledWith(
       4,
       expect.objectContaining({
         type: "TRANSCRIPT_READ_CHUNK",
-        payload: { cursor: 0, maxChars: 8_000 },
+        payload: { cursor: 0, maxChars: 8_000, afterSegmentKey: "" },
       }),
     );
   });
