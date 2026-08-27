@@ -271,7 +271,12 @@
 - [x] 자막 부재 시 텍스트 없는 상태 제공
 - [x] 이미 관찰된 전체 스크립트 우선 사용
 - [x] YouTube와 일반 영상 사이트의 현지화된 전체 스크립트 컨트롤 탐색 prompt
+- [x] YouTube 데스크톱 `더보기 → 스크립트 표시`와 영상 오른쪽 자막 패널 위치 안내
+- [x] 최신 `transcript-segment-view-model` 자막 구간 지원과 전체 영상 재생 완료 대기 금지
 - [x] selector 추측·반복 탐색 방지와 비대화형 분석의 조작 주장 없는 fallback
+- [x] 열린 전체 자막의 cursor 기반 8,000자 청크 읽기와 직전 구간 맥락 유지
+- [x] 구간 요약 → 6개 단위 장 요약 → 전체 타임스탬프 요약 계층 처리
+- [x] 자막 원문의 메인 agent history 누적 방지와 64청크·취소 안전 한도
 - [ ] 제한된 구간 프레임 샘플 계획 (후속 범위)
 - [x] capture rate와 사용자 취소 적용
 
@@ -378,3 +383,29 @@
 - [x] format·lint·typecheck·전체 Vitest·build·audit
 - [x] 320px·480px 단일 action UI·keyboard·live region 정적 QA
 - [x] `docs/VERIFICATION.md` 최신 결과 기록
+
+## L. 브라우저 조작 신뢰성 강화
+
+### L-1. 관찰과 실행 안정성
+
+- [x] 중앙 hit-test 기반 가려진 요소 관찰 제외
+- [x] 실행 직전 `ELEMENT_OCCLUDED` 차단과 retryable 오류 보존
+- [x] 클릭·Enter·폼 상태 변경 뒤 300ms DOM quiet period와 1.5초 최대 대기
+- [x] window·중첩 컨테이너 스크롤의 deterministic auto behavior
+- [x] stale·not-found·occluded·unsafe action 오류의 Background/tool result 전달
+
+### L-2. 폼과 중첩 스크롤
+
+- [x] Select option 표시 라벨·선택·disabled 상태 관찰과 내부 value 비노출
+- [x] Exact label `select_option`과 중복·disabled·미존재 option 차단
+- [x] Checkbox/radio boolean 상태와 `set_checked`, radio clear 차단
+- [x] 가시적인 scrollable ancestor 등록과 방향 제한 `scroll_element`
+- [x] Select·checked 변경 승인과 내부 스크롤 즉시 허용 정책
+
+### L-3. 검증과 후속 범위
+
+- [x] parser·observer·executor·policy·tab service·agent tool 회귀 테스트
+- [x] 빌드 Content Script의 실제 Chromium control fixture 검증
+- [ ] Open Shadow DOM과 same-origin iframe frame coordinator
+- [ ] 사용자 승인 기반 cross-origin iframe 권한 확장
+- [ ] 새 탭·팝업·외부 origin 이동의 browser session 인계

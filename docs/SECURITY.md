@@ -65,6 +65,7 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - DOM snapshot은 보이는 텍스트와 상호작용 가능한 요소만 포함한다.
 - password, hidden, file 입력의 값은 수집하지 않는다.
 - 모든 입력 필드의 현재 값은 제외한다.
+- Select option은 내부 value를 제외하고 최대 50개의 표시 라벨·선택 여부·disabled 여부만 전달한다. Checkbox와 radio는 문자열 value 없이 boolean checked 상태만 전달한다.
 - 링크는 origin만 수집하고 path, query, fragment를 모델에 전달하지 않는다.
 - 현재 페이지 URL도 provider 요청에서 origin으로 축소해 path, query, fragment의 토큰이 모델에 노출되지 않게 한다.
 - 스크린샷은 사용자가 요청했거나 시각 분석을 선택한 경우에만 캡처한다.
@@ -80,11 +81,12 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - `additionalProperties: false`를 적용한다.
 - 모델이 생성한 JavaScript, selector, URL fetch, HTML을 실행하지 않는다.
 - element ID는 현재 관찰 세대에서만 유효하다.
-- 클릭·텍스트 입력에는 관찰 당시의 요소 이름, 역할, 입력 메타데이터, 위치를 포함한 DOM guard를 전달하고 Content Script가 실행 직전에 동기적으로 다시 비교한다.
-- 대상이 숨겨지거나 이동하거나 이름·역할·입력 메타데이터가 바뀌면 stale element로 거부한다.
+- 클릭·텍스트 입력·select·checked·내부 스크롤에는 관찰 당시의 요소 이름, 역할, 선택·체크·스크롤 상태, 입력 메타데이터, 위치를 포함한 DOM guard를 전달하고 Content Script가 실행 직전에 동기적으로 다시 비교한다.
+- 대상이 숨겨지거나 이동하거나 다른 요소에 가려지거나 이름·역할·선택·체크·스크롤·입력 메타데이터가 바뀌면 실행하지 않는다.
 - password, file, hidden 필드와 `one-time-code`, password, 결제 카드 계열 autocomplete 입력은 항상 차단한다.
 - 모델에 전달하는 일반 페이지 텍스트는 현재 뷰포트와 교차하는 렌더링 텍스트로 제한하며 입력 요소와 `contenteditable` 초안은 제외한다.
 - 모든 클릭은 사이트 정의 부작용 가능성이 있으므로 사용자 승인을 요구한다.
+- Select와 checkbox/radio 변경은 change handler의 부작용 가능성이 있으므로 사용자 승인을 요구한다. 내부 컨테이너 스크롤은 즉시 허용한다.
 - 클릭 또는 Enter 뒤에는 같은 모델 응답의 남은 도구를 실행하지 않고 새 페이지를 재관찰한다.
 
 ## 7. 승인 정책
@@ -93,6 +95,7 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 
 - 읽기 전용 관찰과 사용자가 선택한 화면 캡처
 - 안전한 텍스트 필드 입력과 스크롤
+- 최신 관찰에서 확인된 방향의 내부 컨테이너 스크롤
 - YouTube 재생·정지·탐색·속도·볼륨
 
 `confirm`:
@@ -100,6 +103,7 @@ Service Worker만 외부 API를 호출한다. Content Script가 URL을 지정해
 - 모든 요소 클릭
 - Enter 입력으로 폼이 제출될 가능성이 있는 경우
 - 외부 사이트 이동과 다운로드
+- Select option과 checkbox/radio 상태 변경
 
 첫 `confirm` 카드의 `이 요청 모두 승인`을 선택하면 해당 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용한다. 이 grant는 메모리에만 유지하며 실행 완료·취소·정체·비상 안전 한도 종료 시 제거하고 다른 요청으로 승계하지 않는다. `deny` 판단은 grant보다 먼저 적용하므로 요청 전체 승인 후에도 우회할 수 없다.
 

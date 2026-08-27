@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser controls fixture</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 24px;
+      }
+
+      .control {
+        display: block;
+        margin-block: 16px;
+      }
+
+      .covered-area {
+        position: relative;
+        width: 180px;
+        height: 48px;
+      }
+
+      .covered-area button,
+      .overlay {
+        position: absolute;
+        inset: 0;
+      }
+
+      .overlay {
+        z-index: 2;
+        background: rgb(255 255 255 / 80%);
+      }
+
+      .results {
+        width: 320px;
+        height: 120px;
+        overflow-y: auto;
+        border: 1px solid #999;
+      }
+
+      .results-content {
+        height: 600px;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <label class="control">
+      Region
+      <select aria-label="Region">
+        <option value="internal-seoul" selected>Seoul</option>
+        <option value="internal-busan">Busan</option>
+      </select>
+    </label>
+
+    <label class="control">
+      <input type="checkbox" aria-label="Newsletter" value="private-checkbox-value" />
+      Newsletter
+    </label>
+
+    <button id="async-button" class="control" type="button">Load async result</button>
+
+    <div class="covered-area control">
+      <button type="button">Covered action</button>
+      <div class="overlay" aria-hidden="true"></div>
+    </div>
+
+    <section class="results control" aria-label="Results">
+      <div class="results-content">
+        <button type="button">Result item</button>
+      </div>
+    </section>
+
+    <script>
+      document.querySelector("#async-button").addEventListener("click", () => {
+        window.setTimeout(() => {
+          const result = document.createElement("p");
+          result.textContent = "ASYNC-RESULT-READY";
+          document.body.append(result);
+        }, 100);
+      });
+    </script>
+  </body>
+</html>

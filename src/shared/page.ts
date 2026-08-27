@@ -5,6 +5,12 @@ export interface ElementBounds {
   height: number;
 }
 
+export interface ObservedOption {
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+}
+
 export interface ObservedElement {
   id: string;
   tag: string;
@@ -16,6 +22,10 @@ export interface ObservedElement {
   autocomplete?: string;
   href?: string;
   download?: boolean;
+  checked?: boolean;
+  options?: ObservedOption[];
+  scrollableX?: boolean;
+  scrollableY?: boolean;
 }
 
 export interface PageViewport {
@@ -73,6 +83,29 @@ function parseBounds(value: unknown): ElementBounds | null {
   return { x: Number(x), y: Number(y), width: Number(width), height: Number(height) };
 }
 
+function parseObservedOptions(value: unknown): ObservedOption[] | null {
+  if (!Array.isArray(value) || value.length > 50) return null;
+  const options: ObservedOption[] = [];
+  for (const option of value) {
+    if (
+      !isRecord(option) ||
+      Object.keys(option).some((key) => !["label", "selected", "disabled"].includes(key))
+    ) {
+      return null;
+    }
+    if (
+      typeof option.label !== "string" ||
+      option.label.length > 300 ||
+      typeof option.selected !== "boolean" ||
+      typeof option.disabled !== "boolean"
+    ) {
+      return null;
+    }
+    options.push({ label: option.label, selected: option.selected, disabled: option.disabled });
+  }
+  return options;
+}
+
 export function parseObservedElement(value: unknown): ObservedElement | null {
   if (!isRecord(value)) return null;
   const { id, tag, role, name, disabled } = value;
@@ -83,6 +116,11 @@ export function parseObservedElement(value: unknown): ObservedElement | null {
   if (value.autocomplete !== undefined && typeof value.autocomplete !== "string") return null;
   if (value.href !== undefined && typeof value.href !== "string") return null;
   if (value.download !== undefined && typeof value.download !== "boolean") return null;
+  if (value.checked !== undefined && typeof value.checked !== "boolean") return null;
+  if (value.scrollableX !== undefined && typeof value.scrollableX !== "boolean") return null;
+  if (value.scrollableY !== undefined && typeof value.scrollableY !== "boolean") return null;
+  const options = value.options === undefined ? undefined : parseObservedOptions(value.options);
+  if (options === null) return null;
   const base = {
     id: String(id),
     tag: String(tag),
@@ -97,6 +135,10 @@ export function parseObservedElement(value: unknown): ObservedElement | null {
     ...(typeof value.autocomplete === "string" ? { autocomplete: value.autocomplete } : {}),
     ...(typeof value.href === "string" ? { href: value.href } : {}),
     ...(typeof value.download === "boolean" ? { download: value.download } : {}),
+    ...(typeof value.checked === "boolean" ? { checked: value.checked } : {}),
+    ...(options === undefined ? {} : { options }),
+    ...(typeof value.scrollableX === "boolean" ? { scrollableX: value.scrollableX } : {}),
+    ...(typeof value.scrollableY === "boolean" ? { scrollableY: value.scrollableY } : {}),
   };
 }
 

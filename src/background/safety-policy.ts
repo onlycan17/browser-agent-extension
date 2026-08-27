@@ -11,6 +11,9 @@ export type ActionProposal =
   | { action: "type_text"; element: ObservedElement }
   | { action: "press_key"; key: string }
   | { action: "scroll" }
+  | { action: "scroll_element"; element: ObservedElement }
+  | { action: "select_option"; element: ObservedElement }
+  | { action: "set_checked"; element: ObservedElement }
   | { action: "youtube_control" };
 
 const SENSITIVE_PATTERN =
@@ -30,7 +33,11 @@ function externalDestination(element: ObservedElement, pageUrl: string): boolean
 
 export class SafetyPolicy {
   evaluate(proposal: ActionProposal): SafetyDecision {
-    if (proposal.action === "scroll" || proposal.action === "youtube_control") {
+    if (
+      proposal.action === "scroll" ||
+      proposal.action === "scroll_element" ||
+      proposal.action === "youtube_control"
+    ) {
       return { outcome: "allow" };
     }
     if (proposal.action === "press_key") {
@@ -42,6 +49,12 @@ export class SafetyPolicy {
       return {
         outcome: "deny",
         reason: "Sensitive credential and payment fields are not supported.",
+      };
+    }
+    if (proposal.action === "select_option" || proposal.action === "set_checked") {
+      return {
+        outcome: "confirm",
+        reason: "Changing a form control can trigger site-defined side effects.",
       };
     }
     if (proposal.action === "type_text") return this.evaluateTextInput(proposal.element);

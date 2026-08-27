@@ -96,6 +96,11 @@
 - 관찰 이후 이름·역할·위치·가시성·입력 메타데이터가 바뀐 요소의 실행 직전 거부
 - React-style input setter와 input/change event
 - 텍스트 입력 focus와 승인된 Enter의 실제 form requestSubmit
+- Select 표시 라벨·선택 상태와 checkbox/radio boolean 상태 수집, 내부 value 비노출
+- Exact option label 선택, checkbox 상태 변경, radio clear 차단, 중첩 컨테이너 방향별 스크롤
+- 중앙 hit-test에서 가려진 요소 관찰 제외와 실행 직전 `ELEMENT_OCCLUDED` 차단
+- 클릭·Enter·폼 상태 변경 뒤 DOM mutation quiet period와 최대 대기 경계
+- Content Script의 구조화된 action 오류 code/message/retryable 보존
 - YouTube state validation and command bounds
 
 ## 3. 통합 테스트
@@ -142,8 +147,16 @@
 - 현재 프레임 분석
 - 관찰 결과에 이미 전체 스크립트가 있으면 컨트롤 조작보다 우선 사용
 - YouTube `More > Show transcript`와 다른 영상 사이트의 현지화된 Transcript/Script 버튼 탐색 안내
+- positive: YouTube 데스크톱 분석 안내에 `더보기(More) → 스크립트 표시(Show transcript)` 순서와 영상 오른쪽 패널 위치가 함께 포함됨
+- negative: 모든 영상 사이트에서 자막 패널이 항상 오른쪽에 열린다고 단정하지 않음
+- edge: 다른 영상 사이트와 좁은 화면에서는 실제 관찰된 컨트롤과 배치를 따름
 - transcript 탐색은 최대 2회 조작으로 제한하고, 메뉴 클릭 후 최신 snapshot 재관찰, selector 추측·반복 탐색 금지
 - 직접 답변에서 현재 자막과 전체 스크립트를 구분하고, 부재 시 fallback을 안내하되 컨트롤을 열었다고 주장하지 않음
+- 열린 자막을 최대 8,000자 청크로 나누고 구간 경계, 직전 2개 구간 맥락, cursor 연속성을 유지
+- 최신 `transcript-segment-view-model`과 기존 YouTube 자막 DOM을 모두 읽고, 전체 영상 요청에서 재생 완료 대기를 금지
+- 숨겨진 자막, 일반 페이지 본문, 인접 중복 구간을 전용 자막 입력에서 제외
+- 구간별 원문이 메인 agent history에 포함되지 않고 6개 단위 장 요약과 최종 타임스탬프 요약만 반환
+- 자막 부재, 모델 빈 요약, 사용자 취소, 64청크 truncation 안전 한도
 
 ### 보안
 
@@ -152,6 +165,7 @@
 - 승인 후에도 password/payment/OTP deny 유지
 - 평범한 라벨의 `autocomplete=one-time-code`/password/결제 카드 필드 차단
 - 승인 대기 중 숨김·이동·이름 변경된 대상 실행 차단
+- 승인 대기 중 다른 요소에 가려지거나 선택·체크·스크롤 상태가 바뀐 대상 실행 차단
 - 편집 초안과 화면 밖 텍스트가 provider snapshot에 포함되지 않는지 확인
 - 승인 거부 후 실행 중단
 - Chrome 내부 페이지의 명확한 unsupported 안내

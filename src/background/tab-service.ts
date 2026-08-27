@@ -1,10 +1,13 @@
 import type { PageActionRequest, PageActionResult } from "../shared/actions";
 import {
+  parseContentErrorResponse,
   parseActionResponse,
   parseObserveResponse,
   parsePingResponse,
+  parseTranscriptChunkResponse,
 } from "../shared/content-messages";
 import type { PageSnapshot } from "../shared/page";
+import type { TranscriptChunkResult } from "../shared/transcript";
 
 export type PageAccessErrorCode =
   | "UNSUPPORTED_PAGE"
@@ -21,6 +24,17 @@ export class PageAccessError extends Error {
   ) {
     super(message);
     this.name = "PageAccessError";
+  }
+}
+
+export class PageActionError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "PageActionError";
   }
 }
 
@@ -59,6 +73,8 @@ function hasSameOrigin(first: string, second: string): boolean {
 function mayNavigate(action: PageActionRequest): boolean {
   return (
     action.type === "PAGE_CLICK" ||
+    action.type === "PAGE_SELECT_OPTION" ||
+    action.type === "PAGE_SET_CHECKED" ||
     (action.type === "PAGE_PRESS_KEY" && action.payload.key === "Enter")
   );
 }
@@ -127,6 +143,10 @@ export class TabService {
     signal?.throwIfAborted();
     const result = parseActionResponse(response, id);
     if (result === null) {
+      const actionError = parseContentErrorResponse(response, id);
+      if (actionError !== null) {
+        throw new PageActionError(actionError.code, actionError.message, actionError.retryable);
+      }
       throw new PageAccessError(
         "CONTENT_UNAVAILABLE",
         "The page did not execute the action.",
@@ -134,6 +154,35 @@ export class TabService {
       );
     }
     if (runId !== undefined) await this.tabForRun(runId);
+    return result;
+  }
+
+  async readTranscriptChunk(
+    runId: string,
+    cursor: number,
+    maxChars: number,
+    signal?: AbortSignal,
+  ): Promise<TranscriptChunkResult> {
+    signal?.throwIfAborted();
+    const tab = await this.tabForRun(runId);
+    await this.ensureContentScript(tab.id);
+    signal?.throwIfAborted();
+    const id = crypto.randomUUID();
+    const response = await this.adapter.send(tab.id, {
+      id,
+      type: "TRANSCRIPT_READ_CHUNK",
+      payload: { cursor, maxChars },
+    });
+    signal?.throwIfAborted();
+    const result = parseTranscriptChunkResponse(response, id);
+    if (result === null) {
+      throw new PageAccessError(
+        "CONTENT_UNAVAILABLE",
+        "The page did not return a valid transcript chunk.",
+        true,
+      );
+    }
+    await this.tabForRun(runId);
     return result;
   }
 

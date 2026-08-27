@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PageActionRequest } from "../src/shared/actions";
 import {
   createChromeTabAdapter,
+  PageActionError,
   PageAccessError,
   TabService,
   type BrowserTabAdapter,
@@ -69,6 +70,83 @@ describe("TabService", () => {
     const service = new TabService(createAdapter());
 
     await expect(service.observeActivePage()).resolves.toMatchObject({ title: "Example" });
+  });
+
+  it("preserves a structured page-action error from the content script", async () => {
+    const adapter = createAdapter({
+      send: (_tabId, message) => {
+        if (typeof message !== "object" || message === null || !("id" in message)) {
+          return Promise.resolve(null);
+        }
+        if ("type" in message && message.type === "CONTENT_PING") {
+          return Promise.resolve({ id: message.id, ok: true, data: { ready: true } });
+        }
+        return Promise.resolve({
+          id: message.id,
+          ok: false,
+          error: {
+            code: "STALE_ELEMENT",
+            message: "The target changed after observation; observe it again.",
+            retryable: true,
+          },
+        });
+      },
+    });
+    const service = new TabService(adapter);
+
+    await expect(
+      service.executeAction({
+        type: "PAGE_CLICK",
+        payload: { generation: 1, elementId: "e-1", expected: expectedTarget },
+      }),
+    ).rejects.toEqual(
+      new PageActionError(
+        "STALE_ELEMENT",
+        "The target changed after observation; observe it again.",
+        true,
+      ),
+    );
+  });
+
+  it("reads a validated transcript chunk from the pinned page", async () => {
+    const send = vi.fn((_tabId: number, message: unknown) => {
+      if (typeof message !== "object" || message === null || !("id" in message)) {
+        return Promise.resolve(null);
+      }
+      const id = typeof message.id === "string" ? message.id : "unknown";
+      if ("type" in message && message.type === "CONTENT_PING") {
+        return Promise.resolve({ id, ok: true, data: { ready: true } });
+      }
+      return Promise.resolve({
+        id,
+        ok: true,
+        data: {
+          available: true,
+          cursor: 0,
+          nextCursor: 2,
+          done: true,
+          startTime: "00:00",
+          endTime: "00:30",
+          contextText: "",
+          text: "[00:00] Intro\n[00:30] End",
+          segmentCount: 2,
+          totalSegments: 2,
+        },
+      });
+    });
+    const service = new TabService(createAdapter({ send }));
+    await service.pinActivePage("run-transcript");
+
+    await expect(
+      service.readTranscriptChunk("run-transcript", 0, 8_000, new AbortController().signal),
+    ).resolves.toMatchObject({ available: true, done: true, segmentCount: 2 });
+    expect(send).toHaveBeenLastCalledWith(
+      4,
+      expect.objectContaining({
+        type: "TRANSCRIPT_READ_CHUNK",
+        payload: { cursor: 0, maxChars: 8_000 },
+      }),
+    );
   });
 
   it("explains how to grant access when Chrome omits the active tab URL", async () => {

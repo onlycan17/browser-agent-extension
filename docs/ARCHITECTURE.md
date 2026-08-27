@@ -11,6 +11,7 @@ Service Worker
   |     |-- OpenAICompatibleClient
   |     `-- AnthropicClient
   |-- AgentRunner
+  |-- TranscriptSummaryService
   |-- SafetyPolicy
   |-- TabCaptureService
   |
@@ -20,6 +21,7 @@ Content Script
   |-- ElementRegistry
   |-- PageActionExecutor
   |-- YouTubeAdapter
+  |-- TranscriptReader
   |
 Current Web Page
 ```
@@ -44,9 +46,9 @@ Current Web Page
 
 ### Content Script
 
-- 현재 뷰포트와 교차하는 렌더링 텍스트와 상호작용 요소만 수집하며 입력값과 편집 중 초안은 제외한다.
+- 현재 뷰포트와 교차하고 실제 hit-test에서 가려지지 않은 상호작용 요소만 수집하며 입력 문자열 값과 편집 중 초안은 제외한다. Select 표시 라벨, check 상태, 내부 스크롤 가능 방향은 bounded 메타데이터로 구조화한다.
 - 관찰 시점마다 짧은 수명의 element ID를 발급한다.
-- 허용된 명령만 수행하며 selector 또는 JavaScript 문자열을 실행하지 않는다. 요소 동작은 관찰 상태 DOM guard가 실행 직전 상태와 일치할 때만 수행한다.
+- 허용된 명령만 수행하며 selector 또는 JavaScript 문자열을 실행하지 않는다. 요소 동작은 관찰 상태 DOM guard가 실행 직전 상태와 일치하고 다른 요소에 가려지지 않았을 때만 수행한다.
 - 페이지에서 받은 메시지는 확장 메시지로 간주하지 않는다.
 
 ## 3. 데이터 흐름
@@ -63,17 +65,26 @@ Current Web Page
 8. 텍스트/PDF는 untrusted document block, 첨부 이미지와 화면 캡처는 multimodal image part로 구성한다.
 9. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 전송한다.
 
+### 긴 자막 요약
+
+1. 에이전트는 영상 전체 요약 요청에서 재생 제어보다 `summarize_video_transcript`를 우선하며, 영상을 끝까지 재생하거나 종료를 기다리지 않는다. YouTube 데스크톱에서 열린 자막이 없으면 영상 설명 영역의 `더보기(More) → 스크립트 표시(Show transcript)`를 순서대로 선택해 영상 오른쪽 자막 패널을 연 뒤 재관찰한다.
+2. `TranscriptSummaryService`는 pinned tab에 `TRANSCRIPT_READ_CHUNK`를 보내 최대 8,000자의 새로운 타임스탬프 구간과 직전 최대 2개 구간의 겹침 맥락을 읽는다.
+3. 각 청크 원문은 메인 agent history와 분리된 provider 요청에서 요약한다. 자막과 중간 요약은 모두 untrusted data로 표시하고 내부 명령을 따르지 않는다.
+4. 구간 요약이 6개를 넘으면 6개 단위의 장 요약으로 반복 압축한 뒤, 전체 요약·타임스탬프 목차·근거·결론을 생성한다.
+5. 메인 에이전트에는 최종 압축 결과, 처리 청크 수, 시간 범위와 truncation 여부만 tool result로 반환한다. 최대 64청크와 기존 30분 run deadline, 사용자 취소 신호를 적용한다.
+
 ### 도구 실행
 
 1. 모델 응답의 `tool_calls[].function.arguments`를 JSON으로 파싱한다.
 2. 도구별 validator가 정확한 스키마를 검사한다.
 3. SafetyPolicy가 차단, 승인 필요, 즉시 허용 중 하나를 반환한다.
-4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다. 클릭·텍스트 입력은 관찰 당시 요소 상태를 DOM guard로 함께 전달하고 Content Script가 실행 직전에 동기적으로 재검증한다.
+4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다. 클릭·텍스트 입력·select·checked·내부 스크롤은 관찰 당시 요소 상태를 DOM guard로 함께 전달하고 Content Script가 실행 직전에 동기적으로 재검증한다.
 5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭·창 전환과 예상하지 않은 navigation은 실행을 중단한다. 사용자 승인 후 실행한 클릭 또는 Enter는 다음 관찰까지 same-origin navigation 1회를 허용하고 pin URL을 갱신한다.
 6. 클릭 또는 Enter를 실행하면 같은 모델 응답의 남은 tool call은 deferred 결과로 닫고 새 snapshot을 관찰한 뒤 다음 모델 단계에서 다시 판단한다. action 응답이 unload로 유실돼도 allowance는 이 관찰까지만 유지된다.
 7. `capture_screen`은 사용자 허용, pinned tab/window/URL, Chrome rate limit, run당 6회 budget을 모두 만족할 때만 실행한다. 캡처 뒤 같은 응답의 남은 call은 deferred 처리한다.
-8. 허용된 명령만 Content Script 또는 Chrome API로 전달한다. 대상의 가시성, 의미, 입력 메타데이터 또는 위치가 관찰 이후 바뀌면 `STALE_ELEMENT`로 거부하고 새 snapshot에서 다시 판단한다.
-9. 실행 결과를 `role: tool` 메시지로 모델에 반환한다. 캡처 결과 자체는 저장하지 않고 다음 user multimodal message에만 포함한다.
+8. 허용된 명령만 Content Script 또는 Chrome API로 전달한다. 대상의 가시성, 가림 여부, 의미, 선택·체크·스크롤 상태, 입력 메타데이터 또는 위치가 관찰 이후 바뀌면 실행하지 않고 새 snapshot에서 다시 판단한다.
+9. 클릭·Enter·select·checked 뒤에는 최대 1.5초의 bounded DOM quiet period를 기다린다. 일반 페이지와 중첩 컨테이너 스크롤은 즉시 위치가 확정되는 auto behavior를 사용한다.
+10. Content Script의 구조화된 action 오류와 retryable 여부를 보존해 모델이 stale·가림 오류만 새 관찰 후 재시도하게 한다. 실행 결과는 `role: tool` 메시지로 반환하며 캡처 결과 자체는 저장하지 않는다.
 
 ### 실행 종료
 
@@ -158,7 +169,9 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 
 일반 DOM 도구로 비디오를 조작하지 않고 `<video>` 상태를 검증하는 전용 명령만 허용한다. 자막 추출은 페이지 변화에 취약하므로 가용할 때만 사용하는 보조 경로다.
 
-전체 스크립트 탐색은 사이트별 selector나 추가 권한을 사용하지 않는다. shared prompt guidance는 최신 DOM snapshot에 이미 전체 스크립트가 있으면 이를 우선 사용하고, 없을 때만 현지화된 `More`/`Transcript` 계열 컨트롤을 정확한 일회성 element ID로 클릭한 뒤 재관찰하도록 지시한다. 관련 컨트롤을 최대 2회 조작으로 찾지 못하면 현재 관찰 데이터만 사용하고 한계를 알린다.
+전체 스크립트 탐색은 사이트별 selector나 추가 권한을 사용하지 않는다. shared prompt guidance는 최신 DOM snapshot에 이미 전체 스크립트가 있으면 이를 우선 사용한다. 없으면 YouTube 데스크톱에서 현지화된 `더보기(More) → 스크립트 표시(Show transcript)` 컨트롤을 정확한 일회성 element ID로 클릭하고, 영상 오른쪽에 패널이 열린 뒤 재관찰하도록 지시한다. 오른쪽 위치는 YouTube 데스크톱에만 적용하며 다른 사이트와 좁은 배치에서는 관찰 결과를 따른다. 관련 컨트롤을 최대 2회 조작으로 찾지 못하면 현재 관찰 데이터만 사용하고 한계를 알린다.
+
+열린 전체 스크립트가 길면 전용 `TranscriptReader`가 최신 `transcript-segment-view-model`, 기존 `ytd-transcript-segment-renderer`, 명시적 `data-transcript-*` 구간만 cursor 기반으로 읽는다. 일반 `PAGE_OBSERVE`의 12,000자·현재 뷰포트 개인정보 경계를 넓히지 않으며, 일반 페이지 스크롤로 원문을 대화 이력에 누적하지 않는다. 사이트 DOM 변경으로 구조화된 열린 구간을 확인할 수 없으면 임의 selector를 추측하지 않고 unavailable 결과를 반환한다.
 
 ### ADR-007: 요청 메모리 기반 첨부 처리
 

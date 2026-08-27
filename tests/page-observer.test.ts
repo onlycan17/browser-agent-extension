@@ -26,6 +26,7 @@ describe("PageObserver", () => {
   beforeEach(() => {
     document.body.replaceChildren();
     document.title = "Fixture page";
+    Reflect.deleteProperty(document, "elementFromPoint");
   });
 
   it("collects visible interactive elements with short-lived IDs", () => {
@@ -201,5 +202,65 @@ describe("PageObserver", () => {
     const snapshot = new PageObserver(new ElementRegistry()).observe();
 
     expect(snapshot.elements).toHaveLength(0);
+  });
+
+  it("excludes an interactive element covered by another element", () => {
+    const button = appendVisible(document.createElement("button"));
+    button.textContent = "Covered";
+    const overlay = appendVisible(document.createElement("div"));
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => overlay,
+    });
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements.find((item) => item.name === "Covered")).toBeUndefined();
+  });
+
+  it("exposes bounded select and checkbox state without input values", () => {
+    const select = appendVisible(document.createElement("select"));
+    select.setAttribute("aria-label", "Region");
+    select.append(new Option("Seoul", "private-seoul", true, true));
+    select.append(new Option("Busan", "private-busan"));
+    const checkbox = appendVisible(document.createElement("input"));
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.value = "private-checkbox-value";
+    checkbox.setAttribute("aria-label", "Newsletter");
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements.find((item) => item.name === "Region")).toMatchObject({
+      options: [
+        { label: "Seoul", selected: true, disabled: false },
+        { label: "Busan", selected: false, disabled: false },
+      ],
+    });
+    expect(snapshot.elements.find((item) => item.name === "Newsletter")).toMatchObject({
+      checked: true,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("private-seoul");
+    expect(JSON.stringify(snapshot)).not.toContain("private-checkbox-value");
+  });
+
+  it("registers a visible scrollable ancestor of an interactive element", () => {
+    const scroller = appendVisible(document.createElement("section"));
+    scroller.setAttribute("aria-label", "Results");
+    scroller.style.overflowY = "auto";
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+    });
+    const button = document.createElement("button");
+    button.textContent = "Item";
+    makeVisible(button);
+    scroller.append(button);
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements.find((item) => item.name === "Results")).toMatchObject({
+      scrollableY: true,
+    });
   });
 });

@@ -5,6 +5,7 @@ import type { PageSnapshot } from "../src/shared/page";
 import { AGENT_TOOLS, AgentToolExecutor } from "../src/background/agent-tools";
 import { ApprovalManager } from "../src/background/approval-manager";
 import { SafetyPolicy } from "../src/background/safety-policy";
+import { PageActionError } from "../src/background/tab-service";
 
 const snapshot: PageSnapshot = {
   generation: 1,
@@ -29,6 +30,27 @@ const snapshot: PageSnapshot = {
       disabled: false,
       inputType: "password",
       bounds: { x: 10, y: 60, width: 200, height: 40 },
+    },
+    {
+      id: "region",
+      tag: "select",
+      role: "combobox",
+      name: "Region",
+      disabled: false,
+      bounds: { x: 10, y: 110, width: 200, height: 40 },
+      options: [
+        { label: "Seoul", selected: true, disabled: false },
+        { label: "Busan", selected: false, disabled: false },
+      ],
+    },
+    {
+      id: "results",
+      tag: "section",
+      role: "section",
+      name: "Results",
+      disabled: false,
+      bounds: { x: 10, y: 160, width: 300, height: 200 },
+      scrollableY: true,
     },
   ],
 };
@@ -123,5 +145,139 @@ describe("YouTube control tool guidance", () => {
     expect(description).toContain("pause, seek, playback rate, and volume");
     expect(description).toContain("one call for each requested state change");
     expect(description).toContain("Do not click visible player controls");
+  });
+
+  it("offers guarded form and nested-scroll tools", () => {
+    const tools = new Map(AGENT_TOOLS.map((tool) => [tool.function.name, tool]));
+
+    expect(tools.get("select_option")?.function.parameters).toMatchObject({
+      required: ["generation", "elementId", "optionLabel"],
+      additionalProperties: false,
+    });
+    expect(tools.get("set_checked")?.function.parameters).toMatchObject({
+      required: ["generation", "elementId", "checked"],
+      additionalProperties: false,
+    });
+    expect(tools.get("scroll_element")?.function.parameters).toMatchObject({
+      required: ["generation", "elementId", "direction", "amount"],
+      additionalProperties: false,
+    });
+  });
+
+  it("offers a dedicated hierarchical transcript summary tool", () => {
+    const tool = AGENT_TOOLS.find(
+      (candidate) => candidate.function.name === "summarize_video_transcript",
+    );
+
+    expect(tool?.function.description).toContain("opened transcript");
+    expect(tool?.function.description).toContain("chunk");
+    expect(tool?.function.parameters).toMatchObject({
+      properties: { focus: { type: "string", maxLength: 500 } },
+      additionalProperties: false,
+    });
+  });
+});
+
+describe("AgentToolExecutor action errors", () => {
+  it("dispatches guarded select and nested-scroll requests", async () => {
+    const approvals = new ApprovalManager();
+    const seed = approvals.request("run-1", "seed");
+    approvals.decide("run-1", "seed", true);
+    await seed;
+    const executeAction = vi.fn(() => Promise.resolve({ message: "Executed." }));
+    const executor = new AgentToolExecutor(
+      { executeAction },
+      new SafetyPolicy(),
+      approvals,
+      () => undefined,
+    );
+    const signal = new AbortController().signal;
+
+    await executor.execute(
+      toolCall("select", "select_option", {
+        generation: 1,
+        elementId: "region",
+        optionLabel: "Busan",
+      }),
+      snapshot,
+      "run-1",
+      signal,
+    );
+    await executor.execute(
+      toolCall("scroll", "scroll_element", {
+        generation: 1,
+        elementId: "results",
+        direction: "down",
+        amount: 400,
+      }),
+      snapshot,
+      "run-1",
+      signal,
+    );
+
+    expect(executeAction).toHaveBeenNthCalledWith(
+      1,
+      {
+        type: "PAGE_SELECT_OPTION",
+        payload: {
+          generation: 1,
+          elementId: "region",
+          optionLabel: "Busan",
+          expected: snapshot.elements[2],
+        },
+      },
+      "run-1",
+      signal,
+    );
+    expect(executeAction).toHaveBeenNthCalledWith(
+      2,
+      {
+        type: "PAGE_SCROLL_ELEMENT",
+        payload: {
+          generation: 1,
+          elementId: "results",
+          direction: "down",
+          amount: 400,
+          expected: snapshot.elements[3],
+        },
+      },
+      "run-1",
+      signal,
+    );
+  });
+
+  it("returns a retryable structured stale-element result", async () => {
+    const executor = new AgentToolExecutor(
+      {
+        executeAction: () =>
+          Promise.reject(
+            new PageActionError(
+              "STALE_ELEMENT",
+              "The target changed after observation; observe it again.",
+              true,
+            ),
+          ),
+      },
+      new SafetyPolicy(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+    const signal = new AbortController().signal;
+    const call = toolCall("type", "type_text", {
+      generation: 1,
+      elementId: "submit",
+      text: "hello",
+      replace: true,
+    });
+
+    const result = await executor.execute(call, snapshot, "run-1", signal);
+
+    expect(result).toMatchObject({ failed: true, retryableFailure: true });
+    expect(JSON.parse(result.message.content)).toEqual({
+      ok: false,
+      code: "STALE_ELEMENT",
+      error: "The target changed after observation; observe it again.",
+      retryable: true,
+    });
   });
 });

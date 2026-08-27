@@ -1,4 +1,4 @@
-import type { ElementBounds, ObservedElement, PageSnapshot } from "../shared/page";
+import type { ElementBounds, ObservedElement, ObservedOption, PageSnapshot } from "../shared/page";
 import { ElementRegistry } from "./element-registry";
 import { YouTubeAdapter } from "./youtube-adapter";
 
@@ -20,6 +20,7 @@ const MAX_VISIBLE_TEXT = 12_000;
 const MAX_FIELD_TEXT = 300;
 const MAX_TEXT_NODES = 5_000;
 const MAX_TEXT_RANGE_CHECKS = 20_000;
+const MAX_SELECT_OPTIONS = 50;
 
 function compactText(value: string | null | undefined, limit = MAX_FIELD_TEXT): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
@@ -61,6 +62,19 @@ function isVisible(element: HTMLElement): boolean {
     return false;
   const rect = element.getBoundingClientRect();
   return isInViewport(rect);
+}
+
+export function elementIsUnobscured(element: HTMLElement): boolean {
+  if (typeof document.elementFromPoint !== "function") return true;
+  const rect = element.getBoundingClientRect();
+  const x = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(window.innerWidth - 1, 0));
+  const y = Math.min(Math.max(rect.top + rect.height / 2, 0), Math.max(window.innerHeight - 1, 0));
+  const hit = document.elementFromPoint(x, y);
+  return hit === null || hit === element || element.contains(hit);
+}
+
+function isInteractable(element: HTMLElement): boolean {
+  return isVisible(element) && elementIsUnobscured(element);
 }
 
 function labelText(element: HTMLElement): string {
@@ -136,6 +150,31 @@ function elementBounds(element: HTMLElement): ElementBounds {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
+function observedOptions(element: HTMLElement): ObservedOption[] | undefined {
+  if (!(element instanceof HTMLSelectElement)) return undefined;
+  return Array.from(element.options)
+    .slice(0, MAX_SELECT_OPTIONS)
+    .map((option) => ({
+      label: compactText(option.label),
+      selected: option.selected,
+      disabled: option.disabled,
+    }));
+}
+
+function scrollability(element: HTMLElement): { scrollableX: boolean; scrollableY: boolean } {
+  const style = window.getComputedStyle(element);
+  const scrollableX =
+    /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+  const scrollableY =
+    /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+  return { scrollableX, scrollableY };
+}
+
+function observedChecked(element: HTMLElement): boolean | undefined {
+  if (!(element instanceof HTMLInputElement)) return undefined;
+  return element.type === "checkbox" || element.type === "radio" ? element.checked : undefined;
+}
+
 function describeElement(element: HTMLElement, id: string): ObservedElement {
   const inputType =
     element instanceof HTMLInputElement || element instanceof HTMLButtonElement
@@ -144,6 +183,9 @@ function describeElement(element: HTMLElement, id: string): ObservedElement {
   const href = safeLinkOrigin(element);
   const autocomplete = compactText(element.getAttribute("autocomplete"));
   const download = element instanceof HTMLAnchorElement && element.hasAttribute("download");
+  const checked = observedChecked(element);
+  const options = observedOptions(element);
+  const { scrollableX, scrollableY } = scrollability(element);
   const base = {
     id,
     tag: element.tagName.toLowerCase(),
@@ -158,6 +200,10 @@ function describeElement(element: HTMLElement, id: string): ObservedElement {
     ...(autocomplete.length === 0 ? {} : { autocomplete }),
     ...(href === undefined ? {} : { href }),
     ...(download ? { download: true } : {}),
+    ...(checked === undefined ? {} : { checked }),
+    ...(options === undefined ? {} : { options }),
+    ...(scrollableX ? { scrollableX: true } : {}),
+    ...(scrollableY ? { scrollableY: true } : {}),
   };
 }
 
@@ -170,6 +216,24 @@ function sameOptionalValue(
   second: string | boolean | undefined,
 ): boolean {
   return first === second;
+}
+
+function optionsMatch(
+  first: ObservedOption[] | undefined,
+  second: ObservedOption[] | undefined,
+): boolean {
+  if (first === undefined || second === undefined) return first === second;
+  return (
+    first.length === second.length &&
+    first.every((option, index) => {
+      const other = second[index];
+      return (
+        option.label === other?.label &&
+        option.selected === other.selected &&
+        option.disabled === other.disabled
+      );
+    })
+  );
 }
 
 function boundsMatch(first: ElementBounds, second: ElementBounds): boolean {
@@ -197,8 +261,23 @@ export function elementMatchesObservation(
     sameOptionalValue(current.autocomplete, expected.autocomplete) &&
     sameOptionalValue(current.href, expected.href) &&
     sameOptionalValue(current.download, expected.download) &&
+    sameOptionalValue(current.checked, expected.checked) &&
+    optionsMatch(current.options, expected.options) &&
+    sameOptionalValue(current.scrollableX, expected.scrollableX) &&
+    sameOptionalValue(current.scrollableY, expected.scrollableY) &&
     boundsMatch(current.bounds, expected.bounds)
   );
+}
+
+function scrollableAncestors(elements: readonly HTMLElement[]): HTMLElement[] {
+  const found = new Set<HTMLElement>();
+  for (const element of elements) {
+    for (let current = element.parentElement; current !== null; current = current.parentElement) {
+      const { scrollableX, scrollableY } = scrollability(current);
+      if ((scrollableX || scrollableY) && isInteractable(current)) found.add(current);
+    }
+  }
+  return [...found];
 }
 
 function isEditableText(element: HTMLElement): boolean {
@@ -275,9 +354,10 @@ export class PageObserver {
 
   observe(): PageSnapshot {
     const generation = this.registry.beginObservation();
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR));
-    const elements = candidates
-      .filter(isVisible)
+    const interactive = Array.from(document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR));
+    const candidates = [...interactive, ...scrollableAncestors(interactive)];
+    const elements = [...new Set(candidates)]
+      .filter(isInteractable)
       .slice(0, MAX_ELEMENTS)
       .map((element) => observeElement(element, this.registry));
     const youtube = this.youtube.getState();

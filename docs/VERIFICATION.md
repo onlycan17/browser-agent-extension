@@ -1,7 +1,7 @@
 # Verification Record
 
-Date: 2026-08-26
-Scope: unified adaptive agent, attachments/capture, and security hardening after real-browser adversarial QA
+Date: 2026-08-27
+Scope: unified adaptive agent, browser-control reliability, attachments/capture, security hardening, and hierarchical long-transcript summarization
 
 ## Automated gates
 
@@ -12,8 +12,8 @@ Executed from the repository root after the final implementation changes:
 | `npm run format:check`             | Passed; all files match Prettier formatting                                                              |
 | `npm run lint`                     | Passed; zero warnings and errors                                                                         |
 | `npm run typecheck`                | Passed; zero TypeScript errors                                                                           |
-| `npm run test:run`                 | Passed; 39 test files and 287 tests                                                                      |
-| `npm run test:coverage`            | Passed; statements 83.70%, branches 74.41%, functions 92.84%, lines 89.67%                               |
+| `npm run test:run`                 | Passed; 43 test files and 325 tests                                                                      |
+| `npm run test:coverage`            | Passed; statements 83.75%, branches 75.50%, functions 92.69%, lines 89.63%                               |
 | `npm run build`                    | Passed; PDF worker is non-empty and `cmaps/` is populated                                                |
 | `npm audit --audit-level=moderate` | Passed; zero vulnerabilities                                                                             |
 | forbidden-pattern scan             | Passed; no `as any`, TypeScript suppressions, dynamic code execution, debug logging, or secret-like keys |
@@ -27,6 +27,42 @@ Focused regression coverage includes:
 - OpenAI-compatible and Anthropic multiple-image serialization
 - Side Panel attachment metadata, accessible removal, empty-list state, and inline help state
 - PDF.js worker/CMap configuration, page order, cleanup, abort handling, and build-asset validation
+- transcript-only DOM extraction, 8,000-character cursor chunks, overlap context, and hidden/duplicate exclusion
+- current `transcript-segment-view-model` and legacy YouTube transcript DOM coverage, with playback-completion waiting forbidden
+- isolated chunk summaries, six-summary hierarchical merging, raw-chunk history isolation, 64-chunk truncation, and prompt cancellation
+- YouTube desktop `More (더보기) > Show transcript (스크립트 표시)` sequence, right-side panel location, post-open re-observation, and non-YouTube/narrow-layout exception prompt cases
+- visible-element hit testing, select/checked state without internal values, nested-scroll discovery, and guarded form-control actions
+- structured action-error propagation, retryable stale/occluded failures, deterministic scrolling, and bounded DOM quiet-period settlement
+
+## Built Content Script browser-control QA
+
+Production `dist/content.js` was injected into a Chromium fixture through a runtime-message shim. The fixture is retained at `tests/fixtures/browser-controls.html` for repeatable manual browser QA.
+
+| Scenario                                | Result                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| Covered action                          | Passed; center hit-test excluded the button from the observation        |
+| Select metadata                         | Passed; labels were exposed while internal option values were absent    |
+| Exact-label select                      | Passed; `Busan` became the selected option                              |
+| Checkbox state                          | Passed; checked state changed without exposing the input string value   |
+| Nested scroll container                 | Passed; `scrollTop` advanced by exactly 300 pixels                      |
+| Delayed DOM update after click          | Passed; response settled in about 403ms and observed the 100ms update   |
+| Built Content Script message validation | Passed; every action used generation, element ID, and observation guard |
+
+## Built Content Script transcript QA
+
+Production `dist/content.js` was injected into a headed Chromium page with a runtime-message shim and structured transcript fixture. This validates the built Content Script and strict message path; model quality still depends on the configured provider.
+
+| Scenario                             | Result                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Five unique long transcript segments | Passed; cursor sequence returned `2 → 2 → 1` segments                                      |
+| Chunk bounds                         | Passed; 2,000-character requests returned 1,817, 1,817, and 908 characters                 |
+| Completion boundary                  | Passed; final response returned `nextCursor = 5` and `done = true`                         |
+| Overlap context                      | Passed; later chunks included the previous two segments within the 2,000-character limit   |
+| Hidden and duplicate segments        | Passed; hidden sentinel was absent and adjacent duplicate did not increase `totalSegments` |
+| Invalid request                      | Passed; a 100-character chunk request returned `INVALID_MESSAGE`                           |
+| Browser console                      | Passed; no console errors                                                                  |
+
+The built `dist/content.js` was also evaluated against an actual public YouTube watch page after opening its modern transcript panel. It returned 24 total `transcript-segment-view-model` entries; the first 2,000-character chunk contained 21 entries from `0:01` through `2:58` while the 213-second video was still at 103 seconds (`ended = false`). No transcript text was retained in the QA record.
 
 ## Static Side Panel browser QA
 
@@ -71,4 +107,4 @@ An isolated Chromium profile loaded the production `dist/` extension. The toolba
 
 - successful paid Cloud-provider requests with real API keys
 - high-contrast and complete keyboard-only visual QA
-- a public video where transcript controls are available, plus Local-model completion timing after the new fallback guidance
+- Local-model hierarchical-summary timing on a long public video; built Content Script extraction from an actual public modern YouTube transcript passed, but provider-specific end-to-end summary latency remains manual QA

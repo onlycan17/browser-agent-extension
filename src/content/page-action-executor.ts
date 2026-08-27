@@ -2,9 +2,10 @@ import type { AllowedKey, PageActionResult } from "../shared/actions";
 import type { ObservedElement } from "../shared/page";
 import { isSensitiveAutocomplete } from "../shared/sensitive-input";
 import { ElementRegistry } from "./element-registry";
-import { elementMatchesObservation } from "./page-observer";
+import { elementIsUnobscured, elementMatchesObservation } from "./page-observer";
 
-export type ActionExecutionCode = "STALE_ELEMENT" | "ELEMENT_NOT_FOUND" | "UNSAFE_ACTION";
+export type ActionExecutionCode =
+  "STALE_ELEMENT" | "ELEMENT_NOT_FOUND" | "ELEMENT_OCCLUDED" | "UNSAFE_ACTION";
 
 export class ActionExecutionError extends Error {
   constructor(
@@ -48,12 +49,26 @@ function dispatchInputEvents(element: HTMLElement, text: string): void {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function dispatchValueEvents(element: HTMLElement): void {
+  element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setNativeChecked(element: HTMLInputElement, checked: boolean): void {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked");
+  if (descriptor?.set === undefined) {
+    throw new ActionExecutionError("UNSAFE_ACTION", "This control cannot be changed safely.");
+  }
+  descriptor.set.call(element, checked);
+}
+
 export class PageActionExecutor {
   constructor(private readonly registry: ElementRegistry) {}
 
   click(generation: number, elementId: string, expected: ObservedElement): PageActionResult {
     const element = this.resolve(generation, elementId);
     this.assertUnchanged(element, expected);
+    this.assertUnobscured(element);
     if (isDisabled(element))
       throw new ActionExecutionError("UNSAFE_ACTION", "The target is disabled.");
     if (isHidden(element)) throw new ActionExecutionError("UNSAFE_ACTION", "The target is hidden.");
@@ -71,6 +86,7 @@ export class PageActionExecutor {
   ): PageActionResult {
     const element = this.resolve(generation, elementId);
     this.assertUnchanged(element, expected);
+    this.assertUnobscured(element);
     if (isDisabled(element))
       throw new ActionExecutionError("UNSAFE_ACTION", "The target is disabled.");
     if (isHidden(element)) throw new ActionExecutionError("UNSAFE_ACTION", "The target is hidden.");
@@ -108,8 +124,88 @@ export class PageActionExecutor {
   scroll(direction: "up" | "down" | "left" | "right", amount: number): PageActionResult {
     const vertical = direction === "up" ? -amount : direction === "down" ? amount : 0;
     const horizontal = direction === "left" ? -amount : direction === "right" ? amount : 0;
-    window.scrollBy({ top: vertical, left: horizontal, behavior: "smooth" });
+    window.scrollBy({ top: vertical, left: horizontal, behavior: "auto" });
     return { message: `Scrolled ${direction}.` };
+  }
+
+  selectOption(
+    generation: number,
+    elementId: string,
+    optionLabel: string,
+    expected: ObservedElement,
+  ): PageActionResult {
+    const element = this.resolve(generation, elementId);
+    this.assertUnchanged(element, expected);
+    this.assertUnobscured(element);
+    if (!(element instanceof HTMLSelectElement)) {
+      throw new ActionExecutionError("UNSAFE_ACTION", "The target is not a select control.");
+    }
+    const observedOptions =
+      expected.options?.filter((option) => option.label === optionLabel) ?? [];
+    if (observedOptions.length !== 1 || observedOptions[0]?.disabled === true) {
+      throw new ActionExecutionError("ELEMENT_NOT_FOUND", "The requested option is unavailable.");
+    }
+    const options = Array.from(element.options).filter(
+      (option) => option.label.replace(/\s+/g, " ").trim() === optionLabel,
+    );
+    const option = options[0];
+    if (options.length !== 1 || option === undefined || option.disabled) {
+      throw new ActionExecutionError("ELEMENT_NOT_FOUND", "The requested option is unavailable.");
+    }
+    if (option.selected) return { message: "Option was already selected." };
+    element.selectedIndex = option.index;
+    dispatchValueEvents(element);
+    return { message: "Option selected." };
+  }
+
+  setChecked(
+    generation: number,
+    elementId: string,
+    checked: boolean,
+    expected: ObservedElement,
+  ): PageActionResult {
+    const element = this.resolve(generation, elementId);
+    this.assertUnchanged(element, expected);
+    this.assertUnobscured(element);
+    if (
+      !(element instanceof HTMLInputElement) ||
+      (element.type !== "checkbox" && element.type !== "radio")
+    ) {
+      throw new ActionExecutionError("UNSAFE_ACTION", "The target is not a checkable control.");
+    }
+    if (element.type === "radio" && !checked) {
+      throw new ActionExecutionError("UNSAFE_ACTION", "A radio option cannot be cleared.");
+    }
+    if (element.checked === checked) return { message: "Checked state was already set." };
+    setNativeChecked(element, checked);
+    dispatchValueEvents(element);
+    return { message: "Checked state updated." };
+  }
+
+  scrollElement(
+    generation: number,
+    elementId: string,
+    direction: "up" | "down" | "left" | "right",
+    amount: number,
+    expected: ObservedElement,
+  ): PageActionResult {
+    const element = this.resolve(generation, elementId);
+    this.assertUnchanged(element, expected);
+    this.assertUnobscured(element);
+    const verticalDirection = direction === "up" || direction === "down";
+    if (
+      (verticalDirection && expected.scrollableY !== true) ||
+      (!verticalDirection && expected.scrollableX !== true)
+    ) {
+      throw new ActionExecutionError(
+        "UNSAFE_ACTION",
+        "The target is not scrollable in that direction.",
+      );
+    }
+    const vertical = direction === "up" ? -amount : direction === "down" ? amount : 0;
+    const horizontal = direction === "left" ? -amount : direction === "right" ? amount : 0;
+    element.scrollBy({ top: vertical, left: horizontal, behavior: "auto" });
+    return { message: `Element scrolled ${direction}.` };
   }
 
   private resolve(generation: number, elementId: string): HTMLElement {
@@ -128,6 +224,11 @@ export class PageActionExecutor {
       "STALE_ELEMENT",
       "The target changed after observation; observe it again.",
     );
+  }
+
+  private assertUnobscured(element: HTMLElement): void {
+    if (elementIsUnobscured(element)) return;
+    throw new ActionExecutionError("ELEMENT_OCCLUDED", "Another element is covering the target.");
   }
 
   private applyEnterDefault(target: HTMLElement): void {
