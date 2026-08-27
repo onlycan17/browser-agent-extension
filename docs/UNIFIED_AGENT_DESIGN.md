@@ -48,7 +48,7 @@ The current runner stops after three identical page/action transitions. The unif
 - On the second identical transition, append a re-planning instruction.
 - The instruction tells the model to reassess the latest observation, avoid the repeated action, use `capture_screen` if visual context is both allowed and useful, or return a clear limitation.
 - Mark the recovery as used so it can happen only once per run.
-- If the same transition continues to the existing limit, terminate with `safety_limit` as today.
+- If the same transition or an unchanged-page cycle across different non-text actions continues to the existing limit, terminate with `safety_limit`.
 
 Tool failures remain visible to the model. Permanent failed-action signatures still prevent identical retries, while transient screenshot failures remain retryable.
 
@@ -122,7 +122,7 @@ Plans remain internal by default. The final answer may summarize completed steps
 - A simple page question can return a final answer without executing browser tools.
 - An action request can observe, plan, request approval where required, execute, re-observe, and finish through the same lifecycle.
 - Screenshot-disabled runs never capture.
-- Screenshot-enabled runs do not capture automatically; the model can request a fresh screenshot when visual context is useful or progress is blocked.
+- Screenshot-enabled runs do not capture automatically; the model can request a fresh screenshot when visual context is useful or progress is blocked. The capture and provider-safe structured page observation share one untrusted multimodal user message.
 - Attachments work identically for direct answers and action tasks.
 - A repeated transition receives one bounded re-planning opportunity, then still terminates at the existing stall limit if no progress occurs.
 - Local agent start performs the document-context Local Network Access probe and retains current user guidance.
