@@ -16,4 +16,12 @@ describe("Side Panel shell", () => {
     expect(html).toContain('id="stop-button"');
     expect(html).toContain("disabled hidden");
   });
+
+  it("explains that screenshot consent sends page context to an image-capable model", async () => {
+    const html = await readPublicFile("sidepanel.html");
+
+    expect(html).toContain("멀티모달 화면 분석 허용");
+    expect(html).toContain("이미지 입력 지원 모델");
+    expect(html).toContain("이 요청에서만");
+  });
 });
