@@ -161,6 +161,7 @@ export class TabService {
     runId: string,
     cursor: number,
     maxChars: number,
+    afterSegmentKey: string,
     signal?: AbortSignal,
   ): Promise<TranscriptChunkResult> {
     signal?.throwIfAborted();
@@ -171,7 +172,7 @@ export class TabService {
     const response = await this.adapter.send(tab.id, {
       id,
       type: "TRANSCRIPT_READ_CHUNK",
-      payload: { cursor, maxChars },
+      payload: { cursor, maxChars, afterSegmentKey },
     });
     signal?.throwIfAborted();
     const result = parseTranscriptChunkResponse(response, id);

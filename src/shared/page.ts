@@ -39,6 +39,8 @@ export interface YouTubeState {
   title: string;
   currentTime: number;
   duration: number;
+  durationKnown: boolean;
+  isLive: boolean;
   paused: boolean;
   playbackRate: number;
   volume: number;
@@ -143,8 +145,15 @@ export function parseObservedElement(value: unknown): ObservedElement | null {
 }
 
 function parseYouTube(value: unknown): YouTubeState | null {
-  if (!isRecord(value) || typeof value.title !== "string" || typeof value.paused !== "boolean")
+  if (
+    !isRecord(value) ||
+    typeof value.title !== "string" ||
+    typeof value.paused !== "boolean" ||
+    typeof value.durationKnown !== "boolean" ||
+    typeof value.isLive !== "boolean"
+  ) {
     return null;
+  }
   const numbers = [value.currentTime, value.duration, value.playbackRate, value.volume];
   if (!numbers.every(isNumber)) return null;
   if (value.captionText !== undefined && typeof value.captionText !== "string") return null;
@@ -152,6 +161,8 @@ function parseYouTube(value: unknown): YouTubeState | null {
     title: value.title,
     currentTime: Number(value.currentTime),
     duration: Number(value.duration),
+    durationKnown: value.durationKnown,
+    isLive: value.isLive,
     paused: value.paused,
     playbackRate: Number(value.playbackRate),
     volume: Number(value.volume),

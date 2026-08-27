@@ -27,6 +27,7 @@ import {
 } from "./chat-renderer";
 import { copyResponse, shareResponse } from "./response-actions";
 import { PanelRunState } from "./run-state";
+import { consumeScreenshotConsent, resetScreenshotConsent } from "./screenshot-consent";
 
 interface PanelElements {
   form: HTMLFormElement;
@@ -214,6 +215,7 @@ function closeAgentSession(elements: PanelElements, runId: string): void {
   stopAgentKeepAlive = null;
   activeAgentMessage = null;
   clearApproval(elements);
+  resetScreenshotConsent(elements.includeScreenshot);
   setRunning(elements, false);
 }
 
@@ -257,6 +259,7 @@ async function runAgent(elements: PanelElements): Promise<void> {
   const instruction = requirePrompt(elements);
   if (instruction === null) return;
   const attachments = attachmentState.snapshot();
+  const allowScreenshots = consumeScreenshotConsent(elements.includeScreenshot);
   setRunning(elements, true);
   const runId = crypto.randomUUID();
   runState.begin(runId);
@@ -270,7 +273,7 @@ async function runAgent(elements: PanelElements): Promise<void> {
     const payload = {
       runId,
       instruction,
-      allowScreenshots: elements.includeScreenshot.checked,
+      allowScreenshots,
       attachments,
     };
     const settings = await sendRuntimeRequest("SETTINGS_GET", {});

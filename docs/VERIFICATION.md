@@ -1,6 +1,6 @@
 # Verification Record
 
-Date: 2026-08-27
+Date: 2026-08-28
 Scope: unified adaptive agent, browser-control reliability, attachments/capture, security hardening, and hierarchical long-transcript summarization
 
 ## Automated gates
@@ -12,8 +12,8 @@ Executed from the repository root after the final implementation changes:
 | `npm run format:check`             | Passed; all files match Prettier formatting                                                              |
 | `npm run lint`                     | Passed; zero warnings and errors                                                                         |
 | `npm run typecheck`                | Passed; zero TypeScript errors                                                                           |
-| `npm run test:run`                 | Passed; 43 test files and 325 tests                                                                      |
-| `npm run test:coverage`            | Passed; statements 83.75%, branches 75.50%, functions 92.69%, lines 89.63%                               |
+| `npm run test:run`                 | Passed; 44 test files and 341 tests                                                                      |
+| `npm run test:coverage`            | Passed; statements 83.99%, branches 76.04%, functions 92.85%, lines 89.70%                               |
 | `npm run build`                    | Passed; PDF worker is non-empty and `cmaps/` is populated                                                |
 | `npm audit --audit-level=moderate` | Passed; zero vulnerabilities                                                                             |
 | forbidden-pattern scan             | Passed; no `as any`, TypeScript suppressions, dynamic code execution, debug logging, or secret-like keys |
@@ -21,18 +21,19 @@ Executed from the repository root after the final implementation changes:
 Focused regression coverage includes:
 
 - single agent runtime contract, same-`runId` start retry after transport acknowledgement loss, and background deduplication
-- direct answers without tools, prompt-driven adaptive behavior, one bounded re-plan, and third-transition stall termination
-- no consent-only initial screenshot, transient `capture_screen` recovery, deterministic failure caching, six-capture budget, and fresh-image deferral
+- direct answers without tools, prompt-driven adaptive behavior, one bounded re-plan, third-transition stall termination, and distinct text-entry progress
+- no consent-only initial screenshot, one-request consent consumption, transient `capture_screen` recovery, six-capture budget, and capture deferral before/after other calls
 - strict attachment runtime validation, aggregate limits, image signatures, UTF-8/truncation, and PDF errors
 - OpenAI-compatible and Anthropic multiple-image serialization
 - Side Panel attachment metadata, accessible removal, empty-list state, and inline help state
 - PDF.js worker/CMap configuration, page order, cleanup, abort handling, and build-asset validation
-- transcript-only DOM extraction, 8,000-character cursor chunks, overlap context, and hidden/duplicate exclusion
+- transcript-only DOM extraction, 8,000-character cursor chunks, stable segment-key continuation, global duplicate exclusion, late segments, and quiet-timeout partial summaries
 - current `transcript-segment-view-model` and legacy YouTube transcript DOM coverage, with playback-completion waiting forbidden
 - isolated chunk summaries, six-summary hierarchical merging, raw-chunk history isolation, 64-chunk truncation, and prompt cancellation
-- YouTube desktop `More (더보기) > Show transcript (스크립트 표시)` sequence, right-side panel location, post-open re-observation, and non-YouTube/narrow-layout exception prompt cases
+- observation-first YouTube `Show transcript`/`More > Show transcript` hints, post-open re-observation, fixed-location avoidance, and non-YouTube/narrow-layout cases
 - visible-element hit testing, select/checked state without internal values, nested-scroll discovery, and guarded form-control actions
-- structured action-error propagation, retryable stale/occluded failures, deterministic scrolling, and bounded DOM quiet-period settlement
+- structured action-error propagation, retryable stale/occluded failures, deterministic scrolling, bounded DOM quiet-period settlement, and unsettled-success replay prevention
+- finite/live/unknown-duration YouTube state and rejection of seek attempts when duration is Infinity or NaN
 
 ## Built Content Script browser-control QA
 
@@ -72,6 +73,7 @@ The built `dist/sidepanel.html` was served locally and inspected with Playwright
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | 320px viewport                     | `clientWidth = 320`, `scrollWidth = 320`; no horizontal overflow                                            |
 | 480px viewport                     | `clientWidth = 480`, `scrollWidth = 480`; no horizontal overflow                                            |
+| 420px adaptive review viewport     | All composer controls and multimodal consent copy remained visible                                          |
 | Unified primary action             | One submit button labeled `보내기`; no `analyze-button`                                                     |
 | Conditional stop                   | `stop-button` starts hidden and disabled                                                                    |
 | Keyboard and live status           | Composer controls are focusable; live status uses `role="status"` and `aria-live="polite"`                  |
@@ -79,12 +81,14 @@ The built `dist/sidepanel.html` was served locally and inspected with Playwright
 | Unsupported follow-up file         | `index.ts 파일 형식은 지원하지 않습니다.` persisted in inline `data-state="error"` help and the live status |
 | Failed addition state preservation | Existing `README.md` remained selected after the unsupported `index.ts` attempt                             |
 | Removal                            | Chip removal hid the empty list and announced completion in the live region                                 |
+| One-request screenshot consent     | Submitted payload contained `allowScreenshots: true`; checkbox immediately reset to unchecked               |
+| Browser console                    | Passed; zero errors after installing the deterministic Chrome runtime shim                                  |
 
-The static harness reported an expected missing `chrome.runtime` error and a missing favicon because it was served as a normal HTTP page rather than loaded as an extension. These are not extension-context results.
+The current adaptive-change smoke test used a deterministic Chrome runtime shim because the page was served as normal HTTP. It validates the built UI and request payload behavior, not live extension APIs or a real provider.
 
-## Actual unpacked-extension QA
+## Previously recorded unpacked-extension QA
 
-An isolated Chromium profile loaded the production `dist/` extension. The toolbar action opened the real Side Panel and granted tab-scoped access. Synthetic sentinel values were used; the profile and fixtures were removed afterward.
+Before the current adaptive reliability changes, an isolated Chromium profile loaded the production `dist/` extension. The toolbar action opened the real Side Panel and granted tab-scoped access. Synthetic sentinel values were used; the profile and fixtures were removed afterward. The current changes were rechecked with automated and mocked-runtime browser harnesses, not another unpacked-extension run.
 
 | Scenario                                          | Result                                                                                            |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -103,8 +107,16 @@ An isolated Chromium profile loaded the production `dist/` extension. The toolba
 | Approval target mutation                          | Passed; changed/transparent target returned `STALE_ELEMENT` and neither click handler ran         |
 | Focused Enter form submission                     | Passed; text was focused and `requestSubmit()` produced the verified form result                  |
 
+## Independent review closure
+
+- Goal and constraint re-verification: PASS with high confidence; no code blockers.
+- Code quality re-review: PASS with high confidence; no CRITICAL or MAJOR findings.
+- Security re-audit: PASS; maximum severity none.
+- The delegated hands-on QA and history-mining agents could not start because their external API credit was unavailable. Their scope was replaced by the recorded full harness, mocked-runtime Playwright interaction, forbidden-pattern and dependency scans, and local git/GitHub history searches. No additional requirement or regression was found.
+
 ## Remaining external/manual QA
 
+- current adaptive changes in a newly loaded unpacked extension, including real `captureVisibleTab` after a preceding action
 - successful paid Cloud-provider requests with real API keys
 - high-contrast and complete keyboard-only visual QA
 - Local-model hierarchical-summary timing on a long public video; built Content Script extraction from an actual public modern YouTube transcript passed, but provider-specific end-to-end summary latency remains manual QA

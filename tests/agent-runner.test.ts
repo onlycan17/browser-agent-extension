@@ -102,6 +102,51 @@ describe("AgentRunner", () => {
     expect(runner.decideApproval("run-approved", "approval-1", true)).toBe(false);
   });
 
+  it("does not repeat a successful action whose page did not settle", async () => {
+    let completions = 0;
+    let executions = 0;
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions < 3) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [{ ...clickCall, id: `click-${String(completions)}` }],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Click handled once" });
+        },
+      },
+      {
+        execute: (call) => {
+          executions += 1;
+          return Promise.resolve({
+            message: { role: "tool" as const, tool_call_id: call.id, content: '{"ok":true}' },
+            failed: false,
+            signature: "click_element:1:target",
+            pageSettled: false,
+          });
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-unsettled-once", "Click once", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Click handled once", steps: 3 });
+    expect(executions).toBe(1);
+    expect(JSON.stringify(requests[2]?.messages)).toContain(
+      "This action already executed; page settlement was not confirmed",
+    );
+  });
+
   it("returns a direct answer without executing a browser tool", async () => {
     let executions = 0;
     const runner = new AgentRunner(
@@ -174,9 +219,10 @@ describe("AgentRunner", () => {
     expect(systemPrompt).toContain("Use capture_screen only when visual evidence is necessary");
     expect(systemPrompt).toContain("<video_transcript_guidance>");
     expect(systemPrompt).toContain("use a full transcript already present");
-    expect(systemPrompt).toContain("More > Show transcript");
+    expect(systemPrompt).toContain("Show transcript may appear directly in the video description");
     expect(systemPrompt).toContain("More (더보기) > Show transcript (스크립트 표시)");
-    expect(systemPrompt).toContain("right side of the video");
+    expect(systemPrompt).toContain("prefer exact observed controls");
+    expect(systemPrompt).not.toContain("right side of the video");
     expect(systemPrompt).toContain(
       "If the refreshed observation has no transcript control, stop discovery immediately",
     );
@@ -331,6 +377,12 @@ describe("AgentRunner", () => {
       { loadRuntime: () => Promise.resolve(settings) },
       {
         ...tabs(),
+        observeActivePage: () =>
+          Promise.resolve({
+            ...snapshot,
+            url: "https://example.com/private?token=secret#fragment",
+            visibleText: "Visible checkout summary",
+          }),
         captureActivePage: () => {
           captures += 1;
           return Promise.resolve(`data:image/png;base64,capture${String(captures)}`);
@@ -366,10 +418,105 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({ status: "completed", answer: "Visual inspection finished" });
     expect(captures).toBe(1);
     expect(executions).toBe(0);
-    expect(JSON.stringify(requests[1]?.messages)).toContain("Fresh screen capture");
+    const visionMessage = requests[1]?.messages.find(
+      (message) =>
+        message.role === "user" &&
+        Array.isArray(message.content) &&
+        message.content.some((part) => part.type === "image_url"),
+    );
+    const visionContent = visionMessage?.role === "user" ? visionMessage.content : null;
+    expect(Array.isArray(visionContent)).toBe(true);
+    if (!Array.isArray(visionContent)) {
+      throw new Error("Expected multimodal user content");
+    }
+    const textPart = visionContent.find((part) => part.type === "text");
+    const imagePart = visionContent.find((part) => part.type === "image_url");
+    expect(textPart?.type === "text" ? textPart.text : "").toContain(
+      "Structured page observation paired",
+    );
+    expect(imagePart?.type === "image_url" ? imagePart.image_url.url : "").toBe(
+      "data:image/png;base64,capture1",
+    );
+    expect(JSON.stringify(visionMessage)).toContain("Visible checkout summary");
+    expect(JSON.stringify(visionMessage)).toContain('\\"url\\":\\"https://example.com\\"');
+    expect(JSON.stringify(visionMessage)).not.toContain("secret");
+    expect(JSON.stringify(visionMessage)).not.toContain("fragment");
     expect(JSON.stringify(requests[1]?.messages)).toContain(
       "Deferred until a fresh page observation.",
     );
+  });
+
+  it("defers capture after an earlier action until a fresh observation", async () => {
+    let completions = 0;
+    let observations = 0;
+    let captures = 0;
+    let executions = 0;
+    const requests: ChatRequest[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      {
+        ...tabs(),
+        observeActivePage: () => {
+          observations += 1;
+          return Promise.resolve({
+            ...snapshot,
+            visibleText: observations === 1 ? "Before scroll" : "After scroll",
+          });
+        },
+        captureActivePage: () => {
+          captures += 1;
+          return Promise.resolve("data:image/png;base64,after-scroll");
+        },
+      },
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [scrollCall, captureCall],
+            });
+          }
+          if (completions === 2) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [{ ...captureCall, id: "capture-after-observe" }],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Inspection finished" });
+        },
+      },
+      {
+        execute: (call) => {
+          executions += 1;
+          return successfulTool().execute(call);
+        },
+      },
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    const result = await runner.run("run-action-before-capture", "Scroll then inspect", true);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Inspection finished", steps: 3 });
+    expect(executions).toBe(1);
+    expect(captures).toBe(1);
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "Deferred until a fresh page observation.",
+    );
+    const pairedMessage = requests[2]?.messages.find(
+      (message) =>
+        message.role === "user" &&
+        Array.isArray(message.content) &&
+        message.content.some((part) => part.type === "image_url"),
+    );
+    const pairedContent = JSON.stringify(pairedMessage);
+    expect(pairedContent).toContain("Structured page observation paired");
+    expect(pairedContent).toContain("After scroll");
+    expect(pairedContent).not.toContain("Before scroll");
   });
 
   it("retries capture_screen after a transient capture failure", async () => {
@@ -410,7 +557,9 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({ status: "completed", answer: "Capture recovered", steps: 3 });
     expect(captures).toBe(2);
     expect(JSON.stringify(requests[1]?.messages)).toContain("The screen capture failed.");
-    expect(JSON.stringify(requests[2]?.messages)).toContain("Fresh screen capture");
+    expect(JSON.stringify(requests[2]?.messages)).toContain(
+      "Structured page observation paired with the fresh screen capture",
+    );
     expect(JSON.stringify(requests[2]?.messages)).not.toContain(
       "This failed action will not be repeated.",
     );
@@ -733,11 +882,21 @@ describe("AgentRunner", () => {
     expect(executions).toBe(1);
   });
 
-  it("continues beyond the legacy step cap until the model finishes", async () => {
+  it("continues beyond the legacy step cap while the page keeps changing", async () => {
     let completion = 0;
+    let observation = 0;
     const runner = new AgentRunner(
       { loadRuntime: () => Promise.resolve(settings) },
-      tabs(),
+      {
+        ...tabs(),
+        observeActivePage: () => {
+          observation += 1;
+          return Promise.resolve({
+            ...snapshot,
+            visibleText: "Progress ".concat("x".repeat(observation)),
+          });
+        },
+      },
       {
         complete: () => {
           completion += 1;
@@ -820,6 +979,42 @@ describe("AgentRunner", () => {
     expect(result.answer).toContain("did not change the page");
   });
 
+  it("stops alternating ineffective actions when the page never changes", async () => {
+    let completion = 0;
+    const events: AgentEvent[] = [];
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completion += 1;
+          const call: ToolCall = {
+            id: `alternating-${String(completion)}`,
+            type: "function",
+            function: {
+              name: "scroll_page",
+              arguments: JSON.stringify({
+                direction: completion % 2 === 0 ? "up" : "down",
+                amount: 500,
+              }),
+            },
+          };
+          return Promise.resolve({ role: "assistant" as const, content: null, tool_calls: [call] });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      (event) => events.push(event),
+    );
+
+    const result = await runner.run("run-alternating-stall", "Find another route", false);
+
+    expect(result).toMatchObject({ status: "safety_limit", steps: 3 });
+    expect(
+      events.filter((event) => event.type === "AGENT_PROGRESS" && event.payload.code === "REPLAN"),
+    ).toHaveLength(1);
+  });
+
   it("does not treat different text input as the same stalled action", async () => {
     let completion = 0;
     const textValues = ["one", "two", "six"];
@@ -884,6 +1079,8 @@ describe("AgentRunner", () => {
               title: "Live video",
               currentTime: observation,
               duration: 120,
+              durationKnown: true,
+              isLive: false,
               paused: false,
               playbackRate: 1,
               volume: 1,
@@ -906,11 +1103,21 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({ status: "safety_limit", steps: 3 });
   });
 
-  it("stops at the emergency step watchdog", async () => {
+  it("stops at the emergency step watchdog while the page keeps changing", async () => {
     let completion = 0;
+    let observation = 0;
     const runner = new AgentRunner(
       { loadRuntime: () => Promise.resolve(settings) },
-      tabs(),
+      {
+        ...tabs(),
+        observeActivePage: () => {
+          observation += 1;
+          return Promise.resolve({
+            ...snapshot,
+            visibleText: "Progress ".concat("x".repeat(observation)),
+          });
+        },
+      },
       {
         complete: () => {
           completion += 1;

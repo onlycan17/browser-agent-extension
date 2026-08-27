@@ -179,6 +179,36 @@ describe("YouTube control tool guidance", () => {
 });
 
 describe("AgentToolExecutor action errors", () => {
+  it("reports an unsettled successful action without replaying it", async () => {
+    const approvals = new ApprovalManager();
+    const seed = approvals.request("run-unsettled", "seed");
+    approvals.decide("run-unsettled", "seed", true);
+    await seed;
+    const executeAction = vi.fn(() => Promise.resolve({ message: "Clicked.", pageSettled: false }));
+    const executor = new AgentToolExecutor(
+      { executeAction },
+      new SafetyPolicy(),
+      approvals,
+      () => undefined,
+    );
+
+    const result = await executor.execute(
+      toolCall("click", "click_element", { generation: 1, elementId: "submit" }),
+      snapshot,
+      "run-unsettled",
+      new AbortController().signal,
+    );
+
+    expect(result.failed).toBe(false);
+    expect(result.pageSettled).toBe(false);
+    expect(JSON.parse(result.message.content)).toEqual({
+      ok: true,
+      message: "Clicked.",
+      pageSettled: false,
+    });
+    expect(executeAction).toHaveBeenCalledTimes(1);
+  });
+
   it("dispatches guarded select and nested-scroll requests", async () => {
     const approvals = new ApprovalManager();
     const seed = approvals.request("run-1", "seed");

@@ -27,6 +27,7 @@ interface TranscriptChunkReader {
     runId: string,
     cursor: number,
     maxChars: number,
+    afterSegmentKey: string,
     signal: AbortSignal,
   ): Promise<TranscriptChunkResult>;
 }
@@ -188,14 +189,22 @@ export class TranscriptSummaryService {
     let cursor = 0;
     let startTime = "";
     let endTime = "";
+    let afterSegmentKey = "";
     let done = false;
     for (let index = 0; index < MAX_TRANSCRIPT_CHUNKS; index += 1) {
       signal.throwIfAborted();
       const chunk = await waitForAbort(
-        this.reader.readTranscriptChunk(runId, cursor, TRANSCRIPT_CHUNK_MAX_CHARS, signal),
+        this.reader.readTranscriptChunk(
+          runId,
+          cursor,
+          TRANSCRIPT_CHUNK_MAX_CHARS,
+          afterSegmentKey,
+          signal,
+        ),
         signal,
       );
       if (!chunk.available) {
+        if (summaries.length > 0) break;
         throw new TranscriptSummaryError("TRANSCRIPT_UNAVAILABLE", chunk.reason);
       }
       const summary = await this.completeText(
@@ -223,6 +232,7 @@ export class TranscriptSummaryService {
       );
       onProgress(summaries.length, estimatedChunks);
       cursor = chunk.nextCursor;
+      afterSegmentKey = chunk.lastSegmentKey;
       done = chunk.done;
       if (done) break;
     }

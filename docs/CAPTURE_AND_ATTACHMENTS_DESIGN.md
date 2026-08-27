@@ -35,13 +35,13 @@ The limits protect MV3 runtime messaging, browser memory, provider context windo
 
 The agent request uses `allowScreenshots` as request-scoped consent and exposes a zero-argument `capture_screen` tool only when this flag is true.
 
-- The checkbox label is `화면 캡처 허용` and states that the model may capture the visible viewport during this request.
+- The checkbox label is `멀티모달 화면 분석 허용` and states that an image-input-capable model may receive the visible viewport during this request.
 - Enabling consent does not capture the initial screen automatically.
 - The model may request up to 6 captures in one run when visual evidence is useful or DOM-based progress is blocked.
 - `TabService` retains its 550 ms interval, staying below Chrome's two-captures-per-second limit.
 - A capture validates the pinned tab/window/origin before and after capture.
-- A successful capture closes the tool call with a text result and appends the screenshot as untrusted user image data for the next model step.
-- Remaining calls from the same model response are deferred so the model must inspect the fresh screenshot before acting.
+- A successful capture closes the tool call with a text result and appends one untrusted multimodal user message containing the provider-safe structured page observation and screenshot.
+- If a non-capture tool precedes `capture_screen`, capture and later calls are deferred until a fresh post-action observation. After a successful capture, remaining calls are deferred so the model must inspect the fresh screenshot before acting.
 - Cancellation, 30-minute timeout, 100-step emergency limit, and repeated-transition detection remain active.
 - Capturing is observational and does not require action approval, but it is impossible unless the user enabled the request-scoped screenshot option.
 
@@ -112,7 +112,7 @@ Use Mozilla `pdfjs-dist` pinned to an exact version. It is actively maintained, 
 - Data URLs must use an allowed image MIME and valid base64 payload.
 - PDF extraction ignores embedded scripts, links, forms, and attachments.
 - Attachment text and screenshots are explicitly labeled untrusted data to reduce prompt-injection risk.
-- Capture remains request-scoped and gated by the user's checkbox plus existing `activeTab` permission.
+- Capture remains request-scoped and gated by the user's checkbox plus existing `activeTab` permission. The checkbox is consumed and cleared at submission and defensively cleared again when the run closes.
 
 ## 7. Implementation map
 

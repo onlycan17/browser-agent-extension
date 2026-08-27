@@ -222,7 +222,7 @@
 - [x] 관찰 → 모델 → 정책 → 실행 반복
 - [x] role tool 결과 연결
 - [x] 모델 최종 답변까지 완료 중심 실행
-- [x] 안정 page/action fingerprint 기반 3회 반복 정체 감지
+- [x] 안정 page/action fingerprint와 서로 다른 동작의 불변 페이지 상태 기반 3회 정체 감지
 - [x] 전체 run에 적용되는 100단계·30분 비상 안전 한도
 - [x] provider 요청 시작 전·진행 중 AbortController 취소와 listener/timer 정리
 - [x] Side Panel 선발급 run ID로 즉시 취소 race 방지
@@ -252,7 +252,7 @@
 
 - [x] youtube.com watch 페이지 감지
 - [x] video element 탐색
-- [x] 제목, URL, 시간, 길이, 상태 수집
+- [x] 제목, URL, 시간, 길이 확인 여부, 실시간 여부, 상태 수집
 - [x] 속도와 볼륨 수집
 - [x] video 부재/광고 상태 오류 처리
 
@@ -271,10 +271,10 @@
 - [x] 자막 부재 시 텍스트 없는 상태 제공
 - [x] 이미 관찰된 전체 스크립트 우선 사용
 - [x] YouTube와 일반 영상 사이트의 현지화된 전체 스크립트 컨트롤 탐색 prompt
-- [x] YouTube 데스크톱 `더보기 → 스크립트 표시`와 영상 오른쪽 자막 패널 위치 안내
+- [x] 관찰 우선 `스크립트 표시` 또는 `더보기 → 스크립트 표시` 힌트와 고정 패널 위치 가정 제거
 - [x] 최신 `transcript-segment-view-model` 자막 구간 지원과 전체 영상 재생 완료 대기 금지
 - [x] selector 추측·반복 탐색 방지와 비대화형 분석의 조작 주장 없는 fallback
-- [x] 열린 전체 자막의 cursor 기반 8,000자 청크 읽기와 직전 구간 맥락 유지
+- [x] 열린 전체 자막의 cursor·안정 segment key 기반 8,000자 청크 읽기, 비인접 중복 제거, 종료 재확인
 - [x] 구간 요약 → 6개 단위 장 요약 → 전체 타임스탬프 요약 계층 처리
 - [x] 자막 원문의 메인 agent history 누적 방지와 64청크·취소 안전 한도
 - [ ] 제한된 구간 프레임 샘플 계획 (후속 범위)
@@ -301,7 +301,7 @@
 - [x] request-scoped `allowScreenshots` 계약
 - [x] `capture_screen` tool과 run당 6회 budget
 - [x] pinned tab·rate limit·취소·timeout 적용
-- [x] capture 이후 남은 call deferred 및 fresh image 재판단
+- [x] capture 이후 남은 call deferred 및 provider-safe 페이지 관찰과 fresh image의 단일 multimodal message 전달
 
 ### I-4. 첨부 통합
 
@@ -390,7 +390,7 @@
 
 - [x] 중앙 hit-test 기반 가려진 요소 관찰 제외
 - [x] 실행 직전 `ELEMENT_OCCLUDED` 차단과 retryable 오류 보존
-- [x] 클릭·Enter·폼 상태 변경 뒤 300ms DOM quiet period와 1.5초 최대 대기
+- [x] 클릭·Enter·폼 상태 변경 뒤 300ms DOM quiet period와 1.5초 최대 대기, `pageSettled` 결과 보존
 - [x] window·중첩 컨테이너 스크롤의 deterministic auto behavior
 - [x] stale·not-found·occluded·unsafe action 오류의 Background/tool result 전달
 
@@ -409,3 +409,29 @@
 - [ ] Open Shadow DOM과 same-origin iframe frame coordinator
 - [ ] 사용자 승인 기반 cross-origin iframe 권한 확장
 - [ ] 새 탭·팝업·외부 origin 이동의 browser session 인계
+
+## M. 적응형 신뢰성과 멀티모달 페이지 컨텍스트
+
+### M-1. 설계와 하네스
+
+- [x] 가상 특성 테스트로 교대 정체·동적 자막·실시간 영상 공백 재현
+- [x] `ADAPTIVE_RELIABILITY_AND_VISION_DESIGN.md` 작성
+- [x] `HARNESS_PLAN.md`와 `HARNESS_CHECKLIST.md` 작성
+
+### M-2. 구현
+
+- [x] 서로 다른 입력 외 동작의 불변 페이지 순환 정체 감지
+- [x] 자막 안정 segment key, 전역 중복 제거, bounded 종료 재확인
+- [x] action `pageSettled` true/false 전달과 unsettled 성공 시그니처 재실행 차단
+- [x] YouTube `durationKnown`·`isLive` 상태, 실시간 seek 차단, 관찰 우선 자막 안내
+- [x] 요청별 동의 자동 초기화와 provider-safe snapshot·캡처의 단일 multimodal message
+- [x] 선행 action 뒤 캡처 deferred와 최신 재관찰 결합
+- [x] 자막 quiet-check timeout의 미완료·부분 요약 처리
+- [x] Side Panel 이미지 입력 지원 모델 안내
+
+### M-3. 최종 검증
+
+- [x] format·lint·typecheck·전체 Vitest·build·audit
+- [x] 변경 파일 진단과 금지 패턴 검사
+- [x] 정적 Side Panel과 모의 Chrome 런타임 브라우저 smoke QA
+- [x] `docs/VERIFICATION.md` 최종 결과 기록

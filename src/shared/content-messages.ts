@@ -14,7 +14,11 @@ import {
 export type ContentRequest =
   | { id: string; type: "CONTENT_PING"; payload: Record<string, never> }
   | { id: string; type: "PAGE_OBSERVE"; payload: Record<string, never> }
-  | { id: string; type: "TRANSCRIPT_READ_CHUNK"; payload: { cursor: number; maxChars: number } }
+  | {
+      id: string;
+      type: "TRANSCRIPT_READ_CHUNK";
+      payload: { cursor: number; maxChars: number; afterSegmentKey: string };
+    }
   | ({ id: string } & PageActionRequest);
 
 export type ContentResponse<T> =
@@ -240,6 +244,18 @@ export function parseObserveResponse(value: unknown, id: string): PageSnapshot |
 
 export function parseActionResponse(value: unknown, id: string): PageActionResult | null {
   if (!isRecord(value) || value.id !== id || value.ok !== true) return null;
-  if (!isRecord(value.data) || typeof value.data.message !== "string") return null;
-  return { message: value.data.message };
+  if (
+    !isRecord(value.data) ||
+    !hasOnlyKeys(value.data, ["message", "pageSettled"]) ||
+    typeof value.data.message !== "string"
+  ) {
+    return null;
+  }
+  if (value.data.pageSettled !== undefined && typeof value.data.pageSettled !== "boolean") {
+    return null;
+  }
+  return {
+    message: value.data.message,
+    ...(typeof value.data.pageSettled === "boolean" ? { pageSettled: value.data.pageSettled } : {}),
+  };
 }

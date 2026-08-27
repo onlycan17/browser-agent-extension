@@ -1,11 +1,12 @@
 import type { PageActionRequest, PageActionResult } from "../shared/actions";
 import { parseContentRequest, type ContentResponse } from "../shared/content-messages";
 import type { PageSnapshot } from "../shared/page";
+import type { TranscriptChunkResult } from "../shared/transcript";
 import { ElementRegistry } from "./element-registry";
 import { ActionExecutionError, PageActionExecutor } from "./page-action-executor";
 import { PageObserver } from "./page-observer";
 import { waitForPageSettled } from "./page-settler";
-import { readTranscriptChunk } from "./transcript-reader";
+import { readStableTranscriptChunk } from "./transcript-reader";
 import { YouTubeAdapter, YouTubeError } from "./youtube-adapter";
 
 const registry = new ElementRegistry();
@@ -13,8 +14,7 @@ const observer = new PageObserver(registry);
 const actions = new PageActionExecutor(registry);
 const youtube = new YouTubeAdapter();
 
-type ContentData =
-  PageSnapshot | PageActionResult | { ready: true } | ReturnType<typeof readTranscriptChunk>;
+type ContentData = PageSnapshot | PageActionResult | TranscriptChunkResult | { ready: true };
 
 function errorResponse(id: string, code: string, message: string): ContentResponse<never> {
   return { id, ok: false, error: { code, message, retryable: false } };
@@ -69,6 +69,15 @@ async function executeAction(request: PageActionRequest): Promise<PageActionResu
   return youtube.control(request.payload);
 }
 
+function actionNeedsSettlement(request: PageActionRequest): boolean {
+  return (
+    request.type === "PAGE_CLICK" ||
+    request.type === "PAGE_SELECT_OPTION" ||
+    request.type === "PAGE_SET_CHECKED" ||
+    (request.type === "PAGE_PRESS_KEY" && request.payload.key === "Enter")
+  );
+}
+
 async function handleMessage(message: unknown): Promise<ContentResponse<ContentData>> {
   const request = parseContentRequest(message);
   if (request === null)
@@ -80,20 +89,20 @@ async function handleMessage(message: unknown): Promise<ContentResponse<ContentD
     return {
       id: request.id,
       ok: true,
-      data: readTranscriptChunk(document, request.payload.cursor, request.payload.maxChars),
+      data: await readStableTranscriptChunk(
+        document,
+        request.payload.cursor,
+        request.payload.maxChars,
+        request.payload.afterSegmentKey,
+        () => waitForPageSettled(document),
+      ),
     };
   }
   try {
     const result = await executeAction(request);
-    if (
-      request.type === "PAGE_CLICK" ||
-      request.type === "PAGE_SELECT_OPTION" ||
-      request.type === "PAGE_SET_CHECKED" ||
-      (request.type === "PAGE_PRESS_KEY" && request.payload.key === "Enter")
-    ) {
-      await waitForPageSettled(document);
-    }
-    return { id: request.id, ok: true, data: result };
+    if (!actionNeedsSettlement(request)) return { id: request.id, ok: true, data: result };
+    const pageSettled = await waitForPageSettled(document);
+    return { id: request.id, ok: true, data: { ...result, pageSettled } };
   } catch (error: unknown) {
     if (error instanceof ActionExecutionError) {
       const retryable =

@@ -72,7 +72,7 @@
 - whitespace 또는 null text와 빈 tool call 배열 복구, 빈 assistant history 제외, 연속 2회 재시도 경계와 tool call 후 counter reset, 세 번째 빈 응답의 protocol 오류
 - Local agent의 reasoning 비활성화와 Anthropic 등 다른 provider 요청의 설정 미변경
 - 12단계를 넘는 작업의 정상 완료
-- 동일 페이지·동작 2회 반복 시 1회 bounded re-planning, 3회 반복 정체 종료와 동적 숫자·bounds·재생 시간 잡음 무시
+- 동일 전환 또는 서로 다른 입력 외 동작이 같은 페이지 상태를 2회 만들면 1회 bounded re-planning, 3회 정체 종료와 동적 숫자·bounds·재생 시간 잡음 무시
 - 서로 다른 text 입력 fingerprint를 진행으로 구분
 - 100단계와 단계 사이·진행 중 모델 호출의 30분 비상 안전 한도 종료
 - agent 시작 요청 즉시 확인, transport 확인 유실 시 같은 runId 재시도와 background 멱등 deduplication
@@ -82,8 +82,8 @@
 - 안전 한도 종료 후 요청 전체 승인 grant 폐기
 - 동일 실패 도구 반복 방지
 - 요청 전체 승인 카드와 승인/거부 처리, 후속 confirm 카드 미노출
-- `allowScreenshots`가 false면 `capture_screen` 미노출, true면 노출
-- consent만으로 초기 캡처하지 않음, on-demand run당 6회, fresh capture 뒤 남은 call deferred와 새 image 재판단
+- `allowScreenshots`가 false면 `capture_screen` 미노출, true면 노출하며 제출과 run 종료 시 체크가 자동 해제됨
+- consent만으로 초기 캡처하지 않음, on-demand run당 6회, fresh capture와 provider-safe snapshot의 단일 multimodal message 결합, capture 뒤 남은 call 및 선행 action 뒤 capture deferred
 - transient capture 실패 후 다음 모델 단계 재시도와 deterministic budget 실패 반복 차단
 - text/image attachment initial message 전달과 screenshot consent 독립성
 
@@ -99,7 +99,7 @@
 - Select 표시 라벨·선택 상태와 checkbox/radio boolean 상태 수집, 내부 value 비노출
 - Exact option label 선택, checkbox 상태 변경, radio clear 차단, 중첩 컨테이너 방향별 스크롤
 - 중앙 hit-test에서 가려진 요소 관찰 제외와 실행 직전 `ELEMENT_OCCLUDED` 차단
-- 클릭·Enter·폼 상태 변경 뒤 DOM mutation quiet period와 최대 대기 경계
+- 클릭·Enter·폼 상태 변경 뒤 DOM mutation quiet period와 최대 대기 경계, `pageSettled` true/false 보존과 unsettled 성공 시그니처의 run 내 재실행 차단
 - Content Script의 구조화된 action 오류 code/message/retryable 보존
 - YouTube state validation and command bounds
 
@@ -143,18 +143,18 @@
 
 - 영상 상태 표시
 - play/pause
-- seek, speed, volume 경계값
+- seek, speed, volume 경계값과 실시간·Infinity·NaN 길이의 `seek(0)` 거부
 - 현재 프레임 분석
 - 관찰 결과에 이미 전체 스크립트가 있으면 컨트롤 조작보다 우선 사용
 - YouTube `More > Show transcript`와 다른 영상 사이트의 현지화된 Transcript/Script 버튼 탐색 안내
-- positive: YouTube 데스크톱 분석 안내에 `더보기(More) → 스크립트 표시(Show transcript)` 순서와 영상 오른쪽 패널 위치가 함께 포함됨
-- negative: 모든 영상 사이트에서 자막 패널이 항상 오른쪽에 열린다고 단정하지 않음
+- positive: YouTube 분석 안내에 영상 설명의 직접 `스크립트 표시(Show transcript)`와 `더보기(More) → 스크립트 표시`가 관찰 기반 힌트로 포함됨
+- negative: YouTube를 포함한 모든 영상 사이트에서 메뉴·자막 패널 위치를 고정해 단정하지 않음
 - edge: 다른 영상 사이트와 좁은 화면에서는 실제 관찰된 컨트롤과 배치를 따름
 - transcript 탐색은 최대 2회 조작으로 제한하고, 메뉴 클릭 후 최신 snapshot 재관찰, selector 추측·반복 탐색 금지
 - 직접 답변에서 현재 자막과 전체 스크립트를 구분하고, 부재 시 fallback을 안내하되 컨트롤을 열었다고 주장하지 않음
-- 열린 자막을 최대 8,000자 청크로 나누고 구간 경계, 직전 2개 구간 맥락, cursor 연속성을 유지
+- 열린 자막을 최대 8,000자 청크로 나누고 구간 경계, 직전 2개 구간 맥락, 숫자 cursor와 안정 segment key 연속성을 유지
 - 최신 `transcript-segment-view-model`과 기존 YouTube 자막 DOM을 모두 읽고, 전체 영상 요청에서 재생 완료 대기를 금지
-- 숨겨진 자막, 일반 페이지 본문, 인접 중복 구간을 전용 자막 입력에서 제외
+- 숨겨진 자막, 일반 페이지 본문, 인접·비인접 중복 구간을 전용 자막 입력에서 제외하고 종료 중 늦게 추가된 구간을 재확인하며 quiet-check timeout은 부분 요약으로 표시
 - 구간별 원문이 메인 agent history에 포함되지 않고 6개 단위 장 요약과 최종 타임스탬프 요약만 반환
 - 자막 부재, 모델 빈 요약, 사용자 취소, 64청크 truncation 안전 한도
 

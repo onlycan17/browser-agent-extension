@@ -31,11 +31,39 @@ describe("YouTubeAdapter", () => {
     expect(new YouTubeAdapter().getState()).toMatchObject({
       currentTime: 15,
       duration: 120,
+      durationKnown: true,
+      isLive: false,
       playbackRate: 1.25,
       volume: 0.5,
       captionText: "Current caption",
     });
   });
+
+  it("distinguishes live media from a real zero-duration video", () => {
+    const video = addVideo();
+    Object.defineProperty(video, "duration", {
+      configurable: true,
+      value: Number.POSITIVE_INFINITY,
+    });
+
+    expect(new YouTubeAdapter().getState()).toMatchObject({
+      duration: 0,
+      durationKnown: false,
+      isLive: true,
+    });
+  });
+
+  it.each([Number.POSITIVE_INFINITY, Number.NaN])(
+    "rejects seeking when duration is not finite (%s)",
+    async (duration) => {
+      const video = addVideo();
+      Object.defineProperty(video, "duration", { configurable: true, value: duration });
+
+      await expect(new YouTubeAdapter().control({ action: "seek", value: 0 })).rejects.toEqual(
+        new YouTubeError("Seek is unavailable until the video duration is known."),
+      );
+    },
+  );
 
   it("controls pause, seek, volume, and playback rate", async () => {
     const video = addVideo();

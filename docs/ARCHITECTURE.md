@@ -57,18 +57,18 @@ Current Web Page
 
 1. Local provider 연결 확인과 agent 시작 시 Side Panel 또는 설정 문서가 공통 helper의 무인증 `/models` probe로 Chrome의 Local Network Access 권한을 먼저 요청한다.
 2. 사용자가 대상 탭에서 툴바 action을 클릭하면 background가 `chrome.sidePanel.open({ tabId })`로 tab-scoped panel을 열고 `activeTab` 권한을 획득한다.
-3. Side Panel이 선발급한 `runId`, request-scoped attachment snapshot, `allowScreenshots`와 함께 `AGENT_RUN_REQUEST`를 보낸다.
+3. Side Panel이 선발급한 `runId`, request-scoped attachment snapshot, `allowScreenshots`와 함께 `AGENT_RUN_REQUEST`를 보내고 캡처 동의 체크를 즉시 해제한다.
 4. Service Worker가 attachment 계약을 다시 검증하고 Chrome의 마지막 포커스 창에서 활성 탭을 확인한 뒤 실행을 탭 ID, 창 ID, 시작 URL에 고정한다.
 5. Content Script가 `PAGE_OBSERVE`를 받아 구조화된 snapshot을 반환한다.
 6. 최초 메시지는 DOM snapshot과 첨부만 포함한다. 화면 캡처가 허용된 요청에서만 모델이 시각 정보가 필요하거나 DOM 기반 진행이 막혔을 때 `capture_screen`으로 최신 visible viewport를 요청할 수 있다.
 7. Provider에 전달할 snapshot의 현재 페이지 URL은 origin만 남기고 path, query, fragment를 제거한다. 내부 탭 고정과 UI 결과는 원본 URL을 유지한다.
-8. 텍스트/PDF는 untrusted document block, 첨부 이미지와 화면 캡처는 multimodal image part로 구성한다.
+8. 텍스트/PDF는 untrusted document block으로 구성한다. 첨부 이미지는 multimodal image part로 구성하고, 화면 캡처는 provider-safe 구조화 관찰과 이미지를 하나의 untrusted multimodal user message로 묶는다.
 9. ProviderClientRouter가 registry의 protocol에 따라 OpenAI-compatible client 또는 Anthropic native client로 전송한다.
 
 ### 긴 자막 요약
 
-1. 에이전트는 영상 전체 요약 요청에서 재생 제어보다 `summarize_video_transcript`를 우선하며, 영상을 끝까지 재생하거나 종료를 기다리지 않는다. YouTube 데스크톱에서 열린 자막이 없으면 영상 설명 영역의 `더보기(More) → 스크립트 표시(Show transcript)`를 순서대로 선택해 영상 오른쪽 자막 패널을 연 뒤 재관찰한다.
-2. `TranscriptSummaryService`는 pinned tab에 `TRANSCRIPT_READ_CHUNK`를 보내 최대 8,000자의 새로운 타임스탬프 구간과 직전 최대 2개 구간의 겹침 맥락을 읽는다.
+1. 에이전트는 영상 전체 요약 요청에서 재생 제어보다 `summarize_video_transcript`를 우선하며, 영상을 끝까지 재생하거나 종료를 기다리지 않는다. 열린 자막이 없으면 관찰된 `스크립트 표시(Show transcript)` 또는 `더보기(More) → 스크립트 표시` 경로를 최대 2회 사용하고 고정 위치를 가정하지 않은 채 재관찰한다.
+2. `TranscriptSummaryService`는 pinned tab에 `TRANSCRIPT_READ_CHUNK`를 보내 최대 8,000자의 새로운 타임스탬프 구간과 직전 최대 2개 구간의 겹침 맥락을 읽는다. 숫자 cursor는 진행률에 사용하고 직전 구간 key로 DOM 삽입 뒤에도 안정적으로 이어 읽으며, 마지막 구간은 bounded quiet check로 한 번 더 확인한다. 안정화가 확인되지 않고 후속 읽기도 불가능하면 확인한 범위만 부분 결과로 표시한다.
 3. 각 청크 원문은 메인 agent history와 분리된 provider 요청에서 요약한다. 자막과 중간 요약은 모두 untrusted data로 표시하고 내부 명령을 따르지 않는다.
 4. 구간 요약이 6개를 넘으면 6개 단위의 장 요약으로 반복 압축한 뒤, 전체 요약·타임스탬프 목차·근거·결론을 생성한다.
 5. 메인 에이전트에는 최종 압축 결과, 처리 청크 수, 시간 범위와 truncation 여부만 tool result로 반환한다. 최대 64청크와 기존 30분 run deadline, 사용자 취소 신호를 적용한다.
@@ -81,9 +81,9 @@ Current Web Page
 4. 승인 필요 시 실행을 일시 정지하고 Side Panel에 요청 전체 승인 카드를 보낸다. 사용자가 승인하면 같은 `runId`의 후속 `confirm` 동작은 추가 카드 없이 허용하며, 완료·취소·안전 한도 종료 시 grant를 폐기한다. `deny` 동작에는 grant를 적용하지 않는다. 클릭·텍스트 입력·select·checked·내부 스크롤은 관찰 당시 요소 상태를 DOM guard로 함께 전달하고 Content Script가 실행 직전에 동기적으로 재검증한다.
 5. 각 관찰·캡처·동작 전후에 탭 ID, 창 ID, URL을 확인하고 관찰 snapshot의 URL도 대조한다. 탭·창 전환과 예상하지 않은 navigation은 실행을 중단한다. 사용자 승인 후 실행한 클릭 또는 Enter는 다음 관찰까지 same-origin navigation 1회를 허용하고 pin URL을 갱신한다.
 6. 클릭 또는 Enter를 실행하면 같은 모델 응답의 남은 tool call은 deferred 결과로 닫고 새 snapshot을 관찰한 뒤 다음 모델 단계에서 다시 판단한다. action 응답이 unload로 유실돼도 allowance는 이 관찰까지만 유지된다.
-7. `capture_screen`은 사용자 허용, pinned tab/window/URL, Chrome rate limit, run당 6회 budget을 모두 만족할 때만 실행한다. 캡처 뒤 같은 응답의 남은 call은 deferred 처리한다.
+7. `capture_screen`은 사용자 허용, pinned tab/window/URL, Chrome rate limit, run당 6회 budget을 모두 만족할 때만 실행한다. 앞선 action이 있으면 최신 재관찰 다음 턴으로 캡처를 미루며, 캡처와 provider-safe 현재 관찰을 같은 multimodal message로 묶고 같은 응답의 남은 call은 deferred 처리한다.
 8. 허용된 명령만 Content Script 또는 Chrome API로 전달한다. 대상의 가시성, 가림 여부, 의미, 선택·체크·스크롤 상태, 입력 메타데이터 또는 위치가 관찰 이후 바뀌면 실행하지 않고 새 snapshot에서 다시 판단한다.
-9. 클릭·Enter·select·checked 뒤에는 최대 1.5초의 bounded DOM quiet period를 기다린다. 일반 페이지와 중첩 컨테이너 스크롤은 즉시 위치가 확정되는 auto behavior를 사용한다.
+9. 클릭·Enter·select·checked 뒤에는 최대 1.5초의 bounded DOM quiet period를 기다리고 `pageSettled` 결과를 tool message에 보존한다. `false`인 성공 동작 시그니처는 같은 run에서 다시 실행하지 않고 새 관찰에서 판단한다. 일반 페이지와 중첩 컨테이너 스크롤은 즉시 위치가 확정되는 auto behavior를 사용한다.
 10. Content Script의 구조화된 action 오류와 retryable 여부를 보존해 모델이 stale·가림 오류만 새 관찰 후 재시도하게 한다. 실행 결과는 `role: tool` 메시지로 반환하며 캡처 결과 자체는 저장하지 않는다.
 
 ### 실행 종료
@@ -92,8 +92,8 @@ Current Web Page
 2. Side Panel은 실행 중 20초 간격 heartbeat 요청으로 MV3 Service Worker의 유휴 종료를 방지한다. heartbeat는 활성 run, 최근 terminal event, 상태 유실을 구분해 event 유실과 Service Worker 재시작을 복구 가능한 오류로 종료한다.
 3. 모델이 tool call 없는 최종 텍스트를 반환하면 background가 terminal event로 결과를 Side Panel에 전달하고, 최근 20개 결과를 heartbeat 복구용 메모리 캐시에 유지한다.
 4. tool call과 trim된 텍스트가 모두 없는 응답은 history에 넣지 않고 명시적인 계속 요청을 추가한다. 연속 2회까지 재시도하고 세 번째 빈 응답은 `MODEL_PROTOCOL_ERROR` terminal event로 전달한다. Local agent 요청은 reasoning token이 출력 예산을 소진하지 않도록 `reasoning_effort: "none"`을 사용한다.
-5. URL, viewport, 숫자형 시각 정보가 정규화된 visible text, 안정 element 속성, 안정 YouTube 상태와 tool call 묶음이 두 번째 반복되면 run당 한 번만 다른 안전한 접근 방식을 요청한다. 입력 text는 원문 대신 fingerprint로 비교한다.
-6. 동일 전환이 세 번째에도 반복되거나 100단계 또는 30분 비상 한도에 도달하면 `safety_limit`으로 종료한다. 30분 deadline은 초기 관찰부터 모델·승인·도구 대기까지 전체 run의 `AbortController`에 적용한다.
+5. URL, viewport, 숫자형 시각 정보가 정규화된 visible text, 안정 element 속성, 안정 YouTube 상태가 변하지 않으면 동작 묶음이 달라도 정체 후보로 센다. 동일 전환 또는 불변 페이지가 두 번째 반복되면 run당 한 번만 다른 안전한 접근 방식을 요청하며, 관찰에 값이 드러나지 않는 서로 다른 text 입력은 예외로 둔다.
+6. 동일 전환 또는 불변 페이지 상태가 세 번째에도 반복되거나 100단계 또는 30분 비상 한도에 도달하면 `safety_limit`으로 종료한다. 30분 deadline은 초기 관찰부터 모델·승인·도구 대기까지 전체 run의 `AbortController`에 적용한다.
 7. 사용자의 중지 요청은 단계와 무관하게 동일한 `AbortController`로 진행 중 대기를 즉시 취소하며, terminal event 후 heartbeat와 UI 실행 상태를 정리한다.
 
 ## 4. 빌드 구조
@@ -169,9 +169,9 @@ Local, OpenAI, OpenRouter, Groq, Together AI, DeepSeek, Mistral, xAI, Custom은 
 
 일반 DOM 도구로 비디오를 조작하지 않고 `<video>` 상태를 검증하는 전용 명령만 허용한다. 자막 추출은 페이지 변화에 취약하므로 가용할 때만 사용하는 보조 경로다.
 
-전체 스크립트 탐색은 사이트별 selector나 추가 권한을 사용하지 않는다. shared prompt guidance는 최신 DOM snapshot에 이미 전체 스크립트가 있으면 이를 우선 사용한다. 없으면 YouTube 데스크톱에서 현지화된 `더보기(More) → 스크립트 표시(Show transcript)` 컨트롤을 정확한 일회성 element ID로 클릭하고, 영상 오른쪽에 패널이 열린 뒤 재관찰하도록 지시한다. 오른쪽 위치는 YouTube 데스크톱에만 적용하며 다른 사이트와 좁은 배치에서는 관찰 결과를 따른다. 관련 컨트롤을 최대 2회 조작으로 찾지 못하면 현재 관찰 데이터만 사용하고 한계를 알린다.
+전체 스크립트 탐색은 사이트별 selector나 추가 권한을 사용하지 않는다. shared prompt guidance는 최신 DOM snapshot에 이미 전체 스크립트가 있으면 이를 우선 사용한다. 없으면 현지화된 `스크립트 표시(Show transcript)` 또는 `더보기(More) → 스크립트 표시` 컨트롤을 정확한 일회성 element ID로 클릭하고 재관찰하도록 지시한다. 메뉴와 패널 위치는 힌트일 뿐이며 모든 사이트와 배치에서 실제 관찰을 따른다. 관련 컨트롤을 최대 2회 조작으로 찾지 못하면 현재 관찰 데이터만 사용하고 한계를 알린다.
 
-열린 전체 스크립트가 길면 전용 `TranscriptReader`가 최신 `transcript-segment-view-model`, 기존 `ytd-transcript-segment-renderer`, 명시적 `data-transcript-*` 구간만 cursor 기반으로 읽는다. 일반 `PAGE_OBSERVE`의 12,000자·현재 뷰포트 개인정보 경계를 넓히지 않으며, 일반 페이지 스크롤로 원문을 대화 이력에 누적하지 않는다. 사이트 DOM 변경으로 구조화된 열린 구간을 확인할 수 없으면 임의 selector를 추측하지 않고 unavailable 결과를 반환한다.
+열린 전체 스크립트가 길면 전용 `TranscriptReader`가 최신 `transcript-segment-view-model`, 기존 `ytd-transcript-segment-renderer`, 명시적 `data-transcript-*` 구간만 숫자 cursor와 안정 segment key를 함께 사용해 읽고 비인접 중복도 제거한다. 일반 `PAGE_OBSERVE`의 12,000자·현재 뷰포트 개인정보 경계를 넓히지 않으며, 일반 페이지 스크롤로 원문을 대화 이력에 누적하지 않는다. 사이트 DOM 변경으로 구조화된 열린 구간을 확인할 수 없으면 임의 selector를 추측하지 않고 unavailable 결과를 반환한다.
 
 ### ADR-007: 요청 메모리 기반 첨부 처리
 

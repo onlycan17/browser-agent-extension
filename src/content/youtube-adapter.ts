@@ -52,10 +52,13 @@ export class YouTubeAdapter {
     const video = videoElement();
     if (video === null) return undefined;
     const caption = captionText();
+    const durationKnown = Number.isFinite(video.duration) && video.duration >= 0;
     return {
       title: videoTitle(),
       currentTime: video.currentTime,
-      duration: Number.isFinite(video.duration) ? video.duration : 0,
+      duration: durationKnown ? video.duration : 0,
+      durationKnown,
+      isLive: video.duration === Number.POSITIVE_INFINITY,
       paused: video.paused,
       playbackRate: video.playbackRate,
       volume: video.volume,
@@ -68,12 +71,10 @@ export class YouTubeAdapter {
     if (command.action === "play") await video.play();
     if (command.action === "pause") video.pause();
     if (command.action === "seek") {
-      requireRange(
-        command.value,
-        0,
-        Number.isFinite(video.duration) ? video.duration : 0,
-        "Seek time",
-      );
+      if (!Number.isFinite(video.duration) || video.duration < 0) {
+        throw new YouTubeError("Seek is unavailable until the video duration is known.");
+      }
+      requireRange(command.value, 0, video.duration, "Seek time");
       video.currentTime = command.value;
     }
     if (command.action === "set_volume") {

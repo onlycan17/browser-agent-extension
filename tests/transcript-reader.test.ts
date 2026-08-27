@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { readTranscriptChunk } from "../src/content/transcript-reader";
+import { readStableTranscriptChunk, readTranscriptChunk } from "../src/content/transcript-reader";
 
 function addSegment(timestamp: string, text: string): HTMLElement {
   const segment = document.createElement("ytd-transcript-segment-renderer");
@@ -108,6 +108,59 @@ describe("transcript chunk reader", () => {
 
     expect(result).toMatchObject({ available: true, totalSegments: 1, segmentCount: 1 });
     expect(result.available && result.text).toBe("[00:00] Visible introduction");
+  });
+
+  it("continues from a stable segment key after an earlier insertion", () => {
+    addSegment("00:00", "A".repeat(900));
+    const secondElement = addSegment("00:30", "B".repeat(900));
+    addSegment("01:00", "C".repeat(900));
+    const first = readTranscriptChunk(document, 0, 2_000);
+    expect(first).toMatchObject({ available: true, nextCursor: 2, endTime: "00:30" });
+    if (!first.available) throw new Error("Expected the first transcript chunk.");
+
+    const inserted = addSegment("00:15", "Late earlier segment");
+    document.body.insertBefore(inserted, secondElement);
+    const second = readTranscriptChunk(document, first.nextCursor, 2_000, first.lastSegmentKey);
+
+    expect(second).toMatchObject({ available: true, startTime: "01:00" });
+    expect(second.available && second.text).not.toContain("[00:30]");
+  });
+
+  it("removes non-adjacent duplicate transcript segments", () => {
+    addSegment("00:00", "Repeated");
+    addSegment("00:10", "Middle");
+    addSegment("00:00", "Repeated");
+
+    expect(readTranscriptChunk(document, 0, 2_000)).toMatchObject({
+      available: true,
+      totalSegments: 2,
+      segmentCount: 2,
+    });
+  });
+
+  it("keeps a final chunk open when a late segment appears during settlement", async () => {
+    addSegment("00:00", "Opening");
+
+    const first = await readStableTranscriptChunk(document, 0, 2_000, "", () => {
+      addSegment("00:10", "Late segment");
+      return Promise.resolve(true);
+    });
+
+    expect(first).toMatchObject({ available: true, done: false, totalSegments: 2 });
+    if (!first.available) throw new Error("Expected a stable transcript chunk.");
+    expect(
+      readTranscriptChunk(document, first.nextCursor, 2_000, first.lastSegmentKey),
+    ).toMatchObject({ available: true, startTime: "00:10", done: true });
+  });
+
+  it("does not confirm transcript completion when the quiet check times out", async () => {
+    addSegment("00:00", "Still changing");
+
+    const result = await readStableTranscriptChunk(document, 0, 2_000, "", () =>
+      Promise.resolve(false),
+    );
+
+    expect(result).toMatchObject({ available: true, done: false, totalSegments: 1 });
   });
 
   it("reports an unavailable transcript without reading arbitrary page text", () => {
