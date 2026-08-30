@@ -1,5 +1,5 @@
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
@@ -56,6 +56,32 @@ async function bundleContentScript() {
   });
 }
 
+async function listSkillFiles(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await listSkillFiles(full)));
+    else if (entry.name.endsWith(".md")) files.push(full);
+  }
+  return files.sort();
+}
+
+async function bundleSkills() {
+  const sourceDir = resolve(root, "skills");
+  await cp(sourceDir, resolve(outdir, "skills"), { recursive: true });
+  const skillFiles = await listSkillFiles(sourceDir);
+  const relative = skillFiles.map((file) => `skills/${file.slice(sourceDir.length + 1)}`);
+  if (!relative.some((file) => file.endsWith("SKILL.md"))) {
+    throw new Error("The skills directory has no SKILL.md entries.");
+  }
+  await writeFile(
+    resolve(outdir, "skills", "index.json"),
+    `${JSON.stringify(relative, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 async function main() {
   await rm(outdir, { force: true, recursive: true });
   await mkdir(outdir, { recursive: true });
@@ -64,6 +90,7 @@ async function main() {
     bundleModules(),
     bundleContentScript(),
     copyPdfAssets(),
+    bundleSkills(),
   ]);
   const warnings = [moduleResult, contentResult].flatMap((result) => result.warnings);
   if (warnings.length > 0) throw new Error("Build completed with warnings.");
