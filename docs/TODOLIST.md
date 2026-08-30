@@ -368,7 +368,7 @@
 ### K-3. Agent 적응 동작
 
 - [x] 정보 요청의 tool 없는 직접 답변
-- [x] 요청 복잡도에 비례한 prompt 기반 내부 planning
+- [x] 요청 복잡도에 비례한 계획 수립 (`create_plan`/`update_plan` 도구와 단계별 진행 추적)
 - [x] initial screenshot 제거와 on-demand `capture_screen`
 - [x] action 후 fresh DOM 재관찰 유지
 - [x] 두 번째 반복 전환에서 1회 bounded re-planning
@@ -406,9 +406,9 @@
 
 - [x] parser·observer·executor·policy·tab service·agent tool 회귀 테스트
 - [x] 빌드 Content Script의 실제 Chromium control fixture 검증
-- [ ] Open Shadow DOM과 same-origin iframe frame coordinator
+- [x] Open Shadow DOM과 same-origin iframe 관찰 (섹션 R, composed 관찰)
 - [ ] 사용자 승인 기반 cross-origin iframe 권한 확장
-- [ ] 새 탭·팝업·외부 origin 이동의 browser session 인계
+- [x] 새 탭·팝업 이동의 세션 인계 (섹션 N, 멀티탭 세션 추적)
 
 ## M. 적응형 신뢰성과 멀티모달 페이지 컨텍스트
 
@@ -435,3 +435,204 @@
 - [x] 변경 파일 진단과 금지 패턴 검사
 - [x] 정적 Side Panel과 모의 Chrome 런타임 브라우저 smoke QA
 - [x] `docs/VERIFICATION.md` 최종 결과 기록
+
+## N. 멀티탭 세션 추적
+
+### N-1. 설계와 계약
+
+- [x] Aside 브라우저 백그라운드 에이전트 방식 조사
+- [x] `MULTITAB_SESSION_DESIGN.md` 설계 작성
+- [x] ARCHITECTURE.md 세션 탭 계약과 ADR-009 동기화
+
+### N-2. 구현
+
+- [x] run별 세션 탭 추적 (탭 ID 기준)과 사용자 탭 전환 중단 제거
+- [x] `openerTabId` 기반 새 탭·팝업 세션 인계와 후보 TTL 관리
+- [x] 세션 탭이 닫힌 경우의 인계·종료 분기
+- [x] 백그라운드 세션 탭 캡처의 임시 활성화와 이전 탭 복원
+- [x] 백그라운드 content script 주입 실패의 `TAB_ACCESS_REQUIRED` 안내
+
+### N-3. 검증
+
+- [x] 세션 추적·인계·TTL·캡처 복원·권한 오류 테스트
+- [x] 기존 탭 경계 회귀 테스트 갱신
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## O. 명시적 작업 계획(Planner)
+
+### O-1. 설계와 계약
+
+- [x] 복잡한 요청의 하위 태스크 분해 계약 설계
+- [x] `create_plan`(2-10개 하위 태스크)과 `update_plan`(완료 수·현재 단계) 도구 정의
+
+### O-2. 구현
+
+- [x] 계획 호출의 엄격한 arguments validator와 실패 격리
+- [x] 최신 계획 상태를 매 단계 관찰 메시지에 주입해 장기 run 목표 추적 유지
+- [x] 계획 갱신 단계의 `PLAN` 진행 이벤트와 정체 감지 예외 처리
+
+### O-3. 검증
+
+- [x] 계획 파서·runner 주입·invalid arguments 테스트
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## P. 로컬 작업 메모리
+
+### P-1. 설계와 계약
+
+- [x] origin별 메모리 계약 설계 (`save_memory` 도구, origin 키, 보존 정책)
+- [x] 개인 데이터·자격 증명 저장 금지 지침과 untrusted 주입 경계
+
+### P-2. 구현
+
+- [x] `StorageAgentMemoryService`와 `chrome.storage.local` 리포지토리
+- [x] 노트 300자·origin별 8개·90일 보존·run당 3개 상한
+- [x] run 시작 시 같은 origin 메모리 초기 컨텍스트 주입
+- [x] completed 종료 시에만 저장, 저장 실패가 run을 실패시키지 않음
+
+### P-3. 검증
+
+- [x] 저장소 필터·TTL·상한 테스트와 runner 주입·저장 회귀 테스트
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## Q. 사용자 확인 일시 중단(pause/resume)
+
+### Q-1. 설계와 계약
+
+- [x] `pause_for_user` 도구와 승인 카드 재사용 계약 설계
+- [x] pause 대기와 action 승인 grant의 분리 원칙
+
+### Q-2. 구현
+
+- [x] `ApprovalManager.requestPause` — run grant가 있어도 사용자 결정을 대기
+- [x] 5분 상한 대기, 계속·거부 결과의 tool message 반영, run 취소 시 즉시 거부 처리
+- [x] 시스템 프롬프트 지침(자격 증명 직접 처리 금지 유지)
+
+### Q-3. 검증
+
+- [x] pause 격리·계속·거부·취소 테스트와 runner 통합 테스트
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## R. 관찰 확장(composed 관찰)
+
+### R-1. 설계와 계약
+
+- [x] open shadow root와 same-origin iframe 관찰 범위 설계
+- [x] frame·shadow root·요소 스캔 상한 정의
+
+### R-2. 구현
+
+- [x] shadow 경계를 통과하는 composed 부모 순회·hit-test·라벨 해석
+- [x] same-origin iframe 프레임별 관찰(최대 5개)과 프레임별 viewport 좌표
+- [x] shadow root 텍스트의 bounded 수집
+- [x] executor의 focus·activeElement·가림 검사 composed 지원
+
+### R-3. 검증
+
+- [x] shadow 수집·숨김 호스트·iframe 수집·cross-origin 제외 테스트
+- [x] 기존 관찰·실행 회귀 테스트 전부 통과
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## S. 프로바이더 호환성
+
+### S-1. 도구 스키마 정리
+
+- [x] 신규 도구의 `minItems`·`maxItems`·`minLength` 제거(일부 프로바이더가 거부하는 키워드)
+- [x] 경계 검증은 자체 arguments validator에서 유지
+
+### S-2. 오류 원인 가시화
+
+- [x] 4xx(401/403 제외) 거부 시 프로바이더 응답 본문을 300자로 압축해 오류 메시지에 포함
+- [x] API key 거부(401/403)는 응답 본문을 노출하지 않는 기존 보안 계약 유지
+
+### S-3. 재시도 가능한 오류의 자동 백오프
+
+- [x] `PROVIDER_REJECTED`(429/5xx)·`PROVIDER_TIMEOUT` 등 retryable 오류에 최대 3회, 1초→2초→4초 백오프 재시도
+- [x] 재시도 중 run deadline·사용자 취소 즉시 반영과 `RETRY` 진행 이벤트 표시
+- [x] 비재시도 오류와 재시도 소진 시 원본 오류 그대로 전파
+
+### S-4. 검증
+
+- [x] provider-http 오류 매핑 테스트(본문 포함·압축·재시도 여부·401 노출 금지)
+- [x] anthropic/openai 클라이언트 인증 오류 노출 금지 회귀 유지
+- [x] 재시도 성공·소진·비재시도 전파 runner 테스트
+- [x] format·lint·typecheck·전체 Vitest·build 통과
+
+## T. 유튜브 자막 경로 분석 기반 개선
+
+### T-1. 라이브 분석 (실제 YouTube, Playwright)
+
+- [x] 5개 영상에서 더보기→스크립트 표시 탐색과 세그먼트 파싱 검증 (4개 성공, 최대 11,718구간)
+- [x] 신규 `PAmodern_transcript_view` UI 변형 확인 — YouTube `get_transcript` 400으로 세그먼트 미로드(YouTube 측 문제)
+
+### T-2. 구현
+
+- [x] 관찰 셀렉터에 `[role='tab']` 추가 — 신규 UI의 스크립트 탭을 에이전트가 조작 가능
+- [x] 재시도 로직을 `provider-retry.ts` 공용 모듈로 추출(DRY)
+- [x] 자막 청크·병합·최종 요약 provider 호출에 동일 백오프 재시도 적용
+- [x] 실사용 피드백 반영: 자막 컨트롤이 비활성이면 `youtube_control(play)` 1회로 재생 시작 후 재시도 (탐색 예산에서 제외)
+
+### T-3. 검증
+
+- [x] tab 관찰 테스트와 자막 요약 재시도·비재시도 테스트
+- [x] 재생 우선 순서 라이브 회귀 (2개 영상, 재생 중 자막 파싱 정상)
+- [x] format·lint·typecheck·전체 Vitest(385)·build 통과
+
+## U. 번들 스킬 시스템
+
+### U-1. 설계와 계약
+
+- [x] `skills/builtin` 스킬 컬렉션 조사와 Aside 형식 확인
+- [x] `SKILLS_DESIGN.md` 설계 작성 (카탈로그·자동 주입·load_skill 계약)
+
+### U-2. 구현
+
+- [x] `skill-frontmatter.ts` 파서 (name/description/keywords/url, 들여쓰기 YAML 부분집합)
+- [x] `SkillService` 카탈로그 캐시·본문 바운드(16,000자)·자동 주입 매칭(최대 2개)
+- [x] `load_skill` 도구와 runner 처리, 카탈로그 인덱스 초기 메시지 주입
+- [x] build.mjs의 skills 복사 + `index.json` 생성과 빌드 검증
+
+### U-3. 검증
+
+- [x] 파서·서비스·runner 통합 테스트 (실제 번들 파일 사용)
+- [x] format·lint·typecheck·전체 Vitest(395)·build 통과
+
+## V. YouTube 직접 HTTP 경로 (검색 + 자막 폴백)
+
+### V-1. 근거
+
+- [x] `.aside` 설치본의 youtube SKILL.md와 aside-daemon 구현 분석으로 엔드포인트 명세 확보
+- [x] Innertube search(WEB)·player(ANDROID) 엔드포인트 curl 라이브 검증
+- [x] 신규 UI 영상의 DOM 경로 한계 확인 → HTTP 폴백 필요성 입증
+
+### V-2. 구현
+
+- [x] `youtube_search` 도구 (query 1-200자, limit 1-10, 결과: videoId/url/title/channelName)
+- [x] 콘텐츠 스크립트 youtube-http 클라이언트 (WEB search, ANDROID player captionTracks, timedtext XML 파싱)
+- [x] `TRANSCRIPT_READ_CHUNK`의 DOM 실패 시 HTTP 폴백 (동일 청크 계약, videoId 캐시)
+- [x] 안전 정책 allow 분류와 실행 결과 `data` 필드 전달, 실패 시 youtube.com 이동 안내
+
+### V-3. 검증
+
+- [x] search 파싱·XML 파싱·폴백 청크·videoId 추출·액션 파서·executor data 전달 테스트
+- [x] 실제 YouTube 데이터로 전체 HTTP 자막 파이프라인 라이브 검증 (31 트랙 → 286 세그먼트)
+- [x] format·lint·typecheck·전체 Vitest(404)·build 통과
+
+## W. 범용 VTT 자막 계층 (Udemy 등)
+
+### W-1. 근거
+
+- [x] Udemy 강의 분석 흔적에서 사이트 내부 API 기반 VTT 직접 수집 기법 확인
+- [x] 기존 청크 계약 재사용 설계 (DOM → YouTube HTTP → 범용 VTT 3계층)
+
+### W-2. 구현
+
+- [x] `transcript-segments.ts` 공용 모듈 추출 (세그먼트 변환·캐시, DRY)
+- [x] `vtt-transcript.ts`: WEBVTT 파서, `<track>`·performance 리소스 발견, Udemy asset API 어댑터
+- [x] `TRANSCRIPT_READ_CHUNK` 3계층 체인 연결과 자막 URL 비노출 원칙
+- [x] 자막 가이던스에 "패널 열기 전 summarize 우선 호출" 지침 추가
+
+### W-3. 검증
+
+- [x] VTT 파싱(마크업·다중 줄·NOTE)·track/resource 발견·Udemy 로캘 우선 테스트
+- [x] format·lint·typecheck·전체 Vitest(408)·build 통과

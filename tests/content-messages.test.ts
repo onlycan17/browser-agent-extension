@@ -5,7 +5,6 @@ import {
   parseContentRequest,
   parseTranscriptChunkResponse,
 } from "../src/shared/content-messages";
-
 const expected = {
   id: "e-1-1",
   tag: "button",
@@ -182,6 +181,37 @@ describe("content message parser", () => {
         },
         "action-1",
       ),
+    ).toBeNull();
+  });
+
+  it("accepts a bounded youtube search action", () => {
+    expect(
+      parseContentRequest({
+        id: "r-1",
+        type: "YOUTUBE_SEARCH",
+        payload: { query: "  browser agents  ", limit: 5 },
+      }),
+    ).toEqual({
+      id: "r-1",
+      type: "YOUTUBE_SEARCH",
+      payload: { query: "browser agents", limit: 5 },
+    });
+  });
+
+  it("rejects an unbounded youtube search action", () => {
+    expect(
+      parseContentRequest({
+        id: "r-2",
+        type: "YOUTUBE_SEARCH",
+        payload: { query: "x".repeat(201), limit: 5 },
+      }),
+    ).toBeNull();
+    expect(
+      parseContentRequest({
+        id: "r-3",
+        type: "YOUTUBE_SEARCH",
+        payload: { query: "agents", limit: 11 },
+      }),
     ).toBeNull();
   });
 

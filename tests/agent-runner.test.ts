@@ -7,9 +7,66 @@ import {
   AGENT_EMERGENCY_STEP_LIMIT,
   AGENT_RUN_TIMEOUT_MS,
   AgentRunner,
+  MAX_PROVIDER_RETRIES,
+  PROVIDER_RETRY_BASE_DELAY_MS,
 } from "../src/background/agent-runner";
 import { ApprovalManager } from "../src/background/approval-manager";
+import type { AgentMemoryService, MemoryNote } from "../src/background/agent-memory-service";
+import { ProviderError } from "../src/background/provider-http";
+import type { AgentSkillService } from "../src/background/skill-service";
 import { DEFAULT_LOCAL_MODEL, LOCAL_BASE_URL } from "../src/shared/settings";
+
+function skillCatalog() {
+  return {
+    catalog: () =>
+      Promise.resolve([
+        {
+          name: "youtube",
+          description: "YouTube video guidance.",
+          keywords: ["youtube"],
+          urls: [],
+          content: "Start playback before opening the transcript.",
+          path: "skills/builtin/youtube/SKILL.md",
+        },
+        {
+          name: "github",
+          description: "GitHub repo guidance.",
+          keywords: [],
+          urls: ["github.com"],
+          content: "Use canonical URLs.",
+          path: "skills/builtin/site-specific/github/SKILL.md",
+        },
+      ]),
+    content: (name: string) =>
+      Promise.resolve(
+        name === "youtube"
+          ? {
+              name: "youtube",
+              description: "YouTube video guidance.",
+              keywords: ["youtube"],
+              urls: [],
+              content: "Start playback before opening the transcript.",
+              path: "skills/builtin/youtube/SKILL.md",
+            }
+          : null,
+      ),
+    autoInjectSkills: (pageUrl: string, instruction: string) =>
+      Promise.resolve(
+        pageUrl.includes("youtube") || instruction.toLowerCase().includes("youtube")
+          ? [
+              {
+                name: "youtube",
+                description: "YouTube video guidance.",
+                keywords: ["youtube"],
+                urls: [],
+                content: "Start playback before opening the transcript.",
+                path: "skills/builtin/youtube/SKILL.md",
+              },
+            ]
+          : [],
+      ),
+  } satisfies AgentSkillService;
+}
 
 const settings = {
   provider: "local" as const,
@@ -60,6 +117,31 @@ const transcriptSummaryCall: ToolCall = {
     arguments: '{"focus":"핵심 논지와 결론"}',
   },
 };
+
+function memoryService(loaded: MemoryNote[] = []) {
+  const appended: { origin: string; note: MemoryNote }[] = [];
+  return {
+    appended,
+    service: {
+      load: () => Promise.resolve(loaded),
+      append: (origin: string, note: MemoryNote) => {
+        appended.push({ origin, note });
+        return Promise.resolve();
+      },
+    } satisfies AgentMemoryService,
+  };
+}
+
+function memoryCall(id: string): ToolCall {
+  return {
+    id,
+    type: "function",
+    function: {
+      name: "save_memory",
+      arguments: `{"note":"Reusable lesson ${id}","kind":"success"}`,
+    },
+  };
+}
 
 function tabs() {
   return {
@@ -1230,6 +1312,7 @@ describe("AgentRunner", () => {
       new ApprovalManager(),
       () => undefined,
       undefined,
+      undefined,
       () => elapsed,
     );
 
@@ -1237,5 +1320,417 @@ describe("AgentRunner", () => {
 
     expect(result).toMatchObject({ status: "safety_limit", steps: 1 });
     expect(result.answer).toContain("30-minute safety limit");
+  });
+
+  it("accepts an explicit plan and injects tracked progress into later observations", async () => {
+    const requests: ChatRequest[] = [];
+    const events: AgentEvent[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-plan",
+                  type: "function",
+                  function: {
+                    name: "create_plan",
+                    arguments: '{"steps":["Open settings","Save the form"]}',
+                  },
+                },
+              ],
+            });
+          }
+          if (completions === 2) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-progress",
+                  type: "function",
+                  function: {
+                    name: "update_plan",
+                    arguments: '{"completedSteps":1,"currentStep":"Save the form"}',
+                  },
+                },
+              ],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Plan finished" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      (event) => events.push(event),
+    );
+
+    const result = await runner.run("run-planner", "Do it step by step", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Plan finished", steps: 3 });
+    expect(JSON.stringify(requests[2]?.messages)).toContain("Active plan (tracked progress):");
+    expect(JSON.stringify(requests[2]?.messages)).toContain("[done] Open settings");
+    expect(JSON.stringify(requests[2]?.messages)).toContain("[in progress] Save the form");
+    expect(
+      events.filter((event) => event.type === "AGENT_PROGRESS" && event.payload.code === "PLAN")
+        .length,
+    ).toBe(2);
+  });
+
+  it("injects saved site memory and persists new notes only after a completed run", async () => {
+    const memory = memoryService([
+      { text: "The saved search is in the account menu.", kind: "success", savedAt: 1 },
+    ]);
+    const requests: ChatRequest[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [memoryCall("mem-1")],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "All done" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+      undefined,
+      memory.service,
+    );
+
+    const result = await runner.run("run-memory", "Repeat the task", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "All done" });
+    const initial = JSON.stringify(requests[0]?.messages);
+    expect(initial).toContain("Local task memory for this site");
+    expect(initial).toContain("The saved search is in the account menu.");
+    expect(memory.appended).toHaveLength(1);
+    expect(memory.appended[0]).toMatchObject({
+      origin: "https://example.com",
+      note: { kind: "success", text: "Reusable lesson mem-1" },
+    });
+  });
+
+  it("pauses for the user and resumes from a fresh observation after confirmation", async () => {
+    const events: AgentEvent[] = [];
+    const requests: ChatRequest[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-pause",
+                  type: "function",
+                  function: {
+                    name: "pause_for_user",
+                    arguments: '{"reason":"Sign in to the site, then continue."}',
+                  },
+                },
+              ],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Signed in and done" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      (event) => events.push(event),
+    );
+
+    const running = runner.run("run-pause", "Do the signed-in task", false);
+    await vi.waitFor(() => {
+      expect(events.some((event) => event.type === "AGENT_APPROVAL_REQUIRED")).toBe(true);
+    });
+    const approval = events.find(
+      (event): event is Extract<AgentEvent, { type: "AGENT_APPROVAL_REQUIRED" }> =>
+        event.type === "AGENT_APPROVAL_REQUIRED",
+    );
+    expect(approval?.payload.title).toBe("사용자 확인 필요");
+    expect(approval?.payload.detail).toContain("Sign in to the site");
+
+    expect(runner.decideApproval("run-pause", approval?.payload.approvalId ?? "", true)).toBe(true);
+    const result = await running;
+
+    expect(result).toMatchObject({ status: "completed", answer: "Signed in and done" });
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "The user completed the requested step",
+    );
+  });
+
+  it("continues with a limitation note when the user denies the pause request", async () => {
+    const events: AgentEvent[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          completions += 1;
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-pause-deny",
+                  type: "function",
+                  function: {
+                    name: "pause_for_user",
+                    arguments: '{"reason":"Please solve the captcha."}',
+                  },
+                },
+              ],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Stopped gracefully" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      (event) => events.push(event),
+    );
+
+    const running = runner.run("run-pause-deny", "Try the task", false);
+    await vi.waitFor(() => {
+      expect(events.some((event) => event.type === "AGENT_APPROVAL_REQUIRED")).toBe(true);
+    });
+    const approval = events.find(
+      (event): event is Extract<AgentEvent, { type: "AGENT_APPROVAL_REQUIRED" }> =>
+        event.type === "AGENT_APPROVAL_REQUIRED",
+    );
+    runner.decideApproval("run-pause-deny", approval?.payload.approvalId ?? "", false);
+
+    const result = await running;
+
+    expect(result).toMatchObject({ status: "completed", answer: "Stopped gracefully" });
+  });
+
+  it("retries retryable provider errors with backoff and completes", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const events: AgentEvent[] = [];
+      const runner = new AgentRunner(
+        { loadRuntime: () => Promise.resolve(settings) },
+        tabs(),
+        {
+          complete: () => {
+            attempts += 1;
+            if (attempts === 1) {
+              return Promise.reject(
+                new ProviderError("PROVIDER_REJECTED", "rate-limited upstream", true),
+              );
+            }
+            return Promise.resolve({ role: "assistant" as const, content: "Recovered" });
+          },
+        },
+        successfulTool(),
+        new ApprovalManager(),
+        (event) => events.push(event),
+      );
+
+      const running = runner.run("run-retry", "Try the task", false);
+      await vi.advanceTimersByTimeAsync(PROVIDER_RETRY_BASE_DELAY_MS);
+      const result = await running;
+
+      expect(result).toMatchObject({ status: "completed", answer: "Recovered" });
+      expect(attempts).toBe(2);
+      expect(
+        events.some((event) => event.type === "AGENT_PROGRESS" && event.payload.code === "RETRY"),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after the provider retry budget", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const runner = new AgentRunner(
+        { loadRuntime: () => Promise.resolve(settings) },
+        tabs(),
+        {
+          complete: () => {
+            attempts += 1;
+            return Promise.reject(
+              new ProviderError("PROVIDER_REJECTED", "rate-limited upstream", true),
+            );
+          },
+        },
+        successfulTool(),
+        new ApprovalManager(),
+        () => undefined,
+      );
+
+      const running = runner.run("run-retry-budget", "Try the task", false);
+      const settled = running.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(
+        PROVIDER_RETRY_BASE_DELAY_MS * (2 ** MAX_PROVIDER_RETRIES - 1),
+      );
+      const failure = (await settled) as ProviderError;
+
+      expect(failure).toBeInstanceOf(ProviderError);
+      expect(failure).toMatchObject({
+        code: "PROVIDER_REJECTED",
+        message: "rate-limited upstream",
+      });
+      expect(attempts).toBe(MAX_PROVIDER_RETRIES + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry non-retryable provider errors", async () => {
+    let attempts = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: () => {
+          attempts += 1;
+          return Promise.reject(
+            new ProviderError("MODEL_PROTOCOL_ERROR", "unsupported parameter", false),
+          );
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+    );
+
+    await expect(runner.run("run-no-retry", "Try the task", false)).rejects.toMatchObject({
+      code: "MODEL_PROTOCOL_ERROR",
+    });
+    expect(attempts).toBe(1);
+  });
+
+  it("lists the skill catalog, auto-injects matched skills, and serves load_skill", async () => {
+    const requests: ChatRequest[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-skill",
+                  type: "function",
+                  function: { name: "load_skill", arguments: '{"name":"youtube"}' },
+                },
+              ],
+            });
+          }
+          if (completions === 2) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: "call-skill-bad",
+                  type: "function",
+                  function: { name: "load_skill", arguments: '{"name":"nope"}' },
+                },
+              ],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Done with skills" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      skillCatalog(),
+    );
+
+    const result = await runner.run("run-skill", "youtube 요약해줘", false);
+
+    expect(result).toMatchObject({ status: "completed", answer: "Done with skills" });
+    const initial = JSON.stringify(requests[0]?.messages);
+    expect(initial).toContain("Bundled skill catalog");
+    expect(initial).toContain("youtube: YouTube video guidance.");
+    expect(initial).toContain("Start playback before opening the transcript.");
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "Start playback before opening the transcript.",
+    );
+    expect(JSON.stringify(requests[2]?.messages)).toContain("No bundled skill matches this name");
+  });
+
+  it("caps memory notes at three per run", async () => {
+    const memory = memoryService();
+    const requests: ChatRequest[] = [];
+    let completions = 0;
+    const runner = new AgentRunner(
+      { loadRuntime: () => Promise.resolve(settings) },
+      tabs(),
+      {
+        complete: (_settings, request) => {
+          completions += 1;
+          requests.push({ ...request, messages: [...request.messages] });
+          if (completions === 1) {
+            return Promise.resolve({
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                memoryCall("mem-1"),
+                memoryCall("mem-2"),
+                memoryCall("mem-3"),
+                memoryCall("mem-4"),
+              ],
+            });
+          }
+          return Promise.resolve({ role: "assistant" as const, content: "Finished" });
+        },
+      },
+      successfulTool(),
+      new ApprovalManager(),
+      () => undefined,
+      undefined,
+      memory.service,
+    );
+
+    await runner.run("run-memory-cap", "Collect lessons", false);
+
+    expect(memory.appended).toHaveLength(3);
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "The memory note budget for this run is used up.",
+    );
   });
 });

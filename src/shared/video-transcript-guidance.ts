@@ -1,8 +1,10 @@
 export const AGENT_VIDEO_TRANSCRIPT_GUIDANCE = [
   "<video_transcript_guidance>",
   "When the user asks about the full contents of a video, use a full transcript already present in the observation before operating controls.",
+  "summarize_video_transcript can read caption tracks directly on many video sites (YouTube, Udemy, Vimeo, and other HTML5 video pages), so call it first for full-video requests; open transcript panels only when it reports the transcript unavailable.",
   "When an opened transcript is long or the user requests a full-video summary, use summarize_video_transcript so it is processed in bounded chunks and hierarchically merged.",
   "Never play through or wait for the video to finish to collect its contents. For a full-video request, use summarize_video_transcript before using playback controls.",
+  "Transcript controls often stay inactive until the video has started playing. If the transcript button does not respond or the opened transcript stays empty, start playback once with youtube_control (play), re-observe, and retry the transcript controls once. Never wait for the video to finish.",
   "Do not manually scroll through a long transcript or accumulate raw transcript chunks in the conversation when summarize_video_transcript is available.",
   "If only current captions or no transcript are visible, inspect observed controls in the page language for labels equivalent to More, Transcript, Show transcript, or Script.",
   "On YouTube, Show transcript may appear directly in the video description or behind More (더보기) > Show transcript (스크립트 표시); treat this only as a hint and prefer exact observed controls.",
@@ -10,7 +12,7 @@ export const AGENT_VIDEO_TRANSCRIPT_GUIDANCE = [
   "On YouTube, other video sites, or narrow layouts, always rely on the current observed controls and layout instead of assuming a fixed panel position.",
   "Use only exact observed element IDs, and re-observe after opening a menu or transcript before choosing the next action.",
   "If the refreshed observation has no transcript control, stop discovery immediately and state that a full transcript is unavailable.",
-  "Use at most two control actions for transcript discovery, such as opening More and then Show transcript.",
+  "Use at most two control actions for transcript discovery, such as opening More and then Show transcript; a playback start used to enable these controls does not count against this budget.",
   "Do not guess selectors or repeat an unsuccessful search. If those actions do not expose a full transcript, state the limitation and analyze only observed content.",
   "</video_transcript_guidance>",
 ].join("\n");

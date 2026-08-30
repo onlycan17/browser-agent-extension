@@ -3,6 +3,7 @@ import {
   TranscriptSummaryError,
   TranscriptSummaryService,
 } from "../src/background/transcript-summary-service";
+import { ProviderError } from "../src/background/provider-http";
 import type { ChatRequest } from "../src/shared/llm";
 import type { TranscriptChunkResult } from "../src/shared/transcript";
 import { DEFAULT_LOCAL_MODEL, LOCAL_BASE_URL } from "../src/shared/settings";
@@ -273,5 +274,58 @@ describe("TranscriptSummaryService", () => {
     ]);
 
     expect(outcome).toBe("aborted");
+  });
+
+  it("retries a retryable provider error during chunk summarization and continues", async () => {
+    const readTranscriptChunk = vi.fn((_runId, cursor: number) =>
+      Promise.resolve(chunk(cursor, "[00:0" + String(cursor) + "] text", cursor >= 1, 2)),
+    );
+    let completions = 0;
+    const complete = vi.fn((_settings, request: ChatRequest) => {
+      completions += 1;
+      const system = request.messages[0]?.content;
+      if (
+        typeof system === "string" &&
+        system.includes("one transcript chunk") &&
+        completions === 1
+      ) {
+        return Promise.reject(
+          new ProviderError("PROVIDER_REJECTED", "rate-limited upstream", true),
+        );
+      }
+      return Promise.resolve({ role: "assistant" as const, content: "chunk summary" });
+    });
+    const delays: number[] = [];
+    const service = new TranscriptSummaryService(
+      { readTranscriptChunk },
+      { complete },
+      (milliseconds) => {
+        delays.push(milliseconds);
+        return Promise.resolve();
+      },
+    );
+
+    const result = await service.summarize(settings, "run-retry", "", new AbortController().signal);
+
+    expect(result.chunks).toBe(2);
+    expect(delays).toEqual([1_000]);
+    expect(completions).toBe(4);
+  });
+
+  it("does not retry a non-retryable provider error during chunk summarization", async () => {
+    const readTranscriptChunk = vi.fn(() => Promise.resolve(chunk(0, "[00:00] text", false, 2)));
+    let completions = 0;
+    const complete = vi.fn(() => {
+      completions += 1;
+      return Promise.reject(
+        new ProviderError("MODEL_PROTOCOL_ERROR", "unsupported parameter", false),
+      );
+    });
+    const service = new TranscriptSummaryService({ readTranscriptChunk }, { complete });
+
+    await expect(
+      service.summarize(settings, "run-no-retry", "", new AbortController().signal),
+    ).rejects.toBeInstanceOf(ProviderError);
+    expect(completions).toBe(1);
   });
 });

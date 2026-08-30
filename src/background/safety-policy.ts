@@ -14,7 +14,8 @@ export type ActionProposal =
   | { action: "scroll_element"; element: ObservedElement }
   | { action: "select_option"; element: ObservedElement }
   | { action: "set_checked"; element: ObservedElement }
-  | { action: "youtube_control" };
+  | { action: "youtube_control" }
+  | { action: "youtube_search" };
 
 const SENSITIVE_PATTERN =
   /password|passcode|one.?time|otp|card number|cvv|cvc|비밀번호|인증.?코드|카드.?번호/i;
@@ -36,7 +37,8 @@ export class SafetyPolicy {
     if (
       proposal.action === "scroll" ||
       proposal.action === "scroll_element" ||
-      proposal.action === "youtube_control"
+      proposal.action === "youtube_control" ||
+      proposal.action === "youtube_search"
     ) {
       return { outcome: "allow" };
     }

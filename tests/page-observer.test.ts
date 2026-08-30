@@ -263,4 +263,78 @@ describe("PageObserver", () => {
       scrollableY: true,
     });
   });
+
+  it("collects interactive elements inside open shadow roots", () => {
+    const host = appendVisible(document.createElement("div"));
+    const shadow = host.attachShadow({ mode: "open" });
+    const button = document.createElement("button");
+    button.textContent = "Shadow action";
+    button.setAttribute("aria-label", "Shadow action");
+    makeVisible(button);
+    shadow.append(button);
+
+    const registry = new ElementRegistry();
+    const snapshot = new PageObserver(registry).observe();
+
+    expect(snapshot.elements).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Shadow action", role: "button" })]),
+    );
+    const shadowElement = snapshot.elements.find((item) => item.name === "Shadow action");
+    expect(registry.resolve(snapshot.generation, shadowElement?.id ?? "")).not.toBeNull();
+  });
+
+  it("hides shadow children whose host is hidden without leaving the tree", () => {
+    const host = appendVisible(document.createElement("div"));
+    host.style.display = "none";
+    const shadow = host.attachShadow({ mode: "open" });
+    const button = document.createElement("button");
+    button.textContent = "Hidden shadow action";
+    makeVisible(button);
+    shadow.append(button);
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements.find((item) => item.name === "Hidden shadow action")).toBeUndefined();
+  });
+
+  it("collects interactive elements inside same-origin iframes", () => {
+    const frame = appendVisible(document.createElement("iframe"));
+    const frameDoc = frame.contentDocument;
+    const frameWin = frameDoc?.defaultView;
+    if (frameDoc === null || frameWin == null) {
+      throw new Error("jsdom did not provide a same-origin frame document.");
+    }
+    const button = frameDoc.createElement("button");
+    button.textContent = "Frame action";
+    button.setAttribute("aria-label", "Frame action");
+    makeVisible(button);
+    frameDoc.body.append(button);
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Frame action", role: "button" })]),
+    );
+  });
+
+  it("skips cross-origin frames whose documents are inaccessible", () => {
+    const frame = appendVisible(document.createElement("iframe"));
+    Object.defineProperty(frame, "contentDocument", { value: null });
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements).toEqual([]);
+  });
+
+  it("collects tab controls so transcript tabs stay reachable", () => {
+    const tab = appendVisible(document.createElement("div"));
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-label", "스크립트");
+    tab.textContent = "스크립트";
+
+    const snapshot = new PageObserver(new ElementRegistry()).observe();
+
+    expect(snapshot.elements).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "스크립트", role: "tab" })]),
+    );
+  });
 });

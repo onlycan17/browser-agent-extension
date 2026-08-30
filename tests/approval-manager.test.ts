@@ -78,4 +78,41 @@ describe("ApprovalManager", () => {
 
     expect(manager.isRunApproved("run-1")).toBe(false);
   });
+
+  it("keeps a pause request pending even when the run already has an action grant", async () => {
+    const manager = new ApprovalManager();
+    manager.decide("run-1", "seed-approval", true);
+    const decision = manager.requestPause("run-1", "pause-1", 1000);
+    let resolved = false;
+    void decision.then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    manager.decide("run-1", "pause-1", true);
+    await expect(decision).resolves.toBe(true);
+    expect(manager.isRunApproved("run-1")).toBe(false);
+  });
+
+  it("resolves a pause decision without granting action approvals", async () => {
+    const manager = new ApprovalManager();
+    const decision = manager.requestPause("run-1", "pause-1", 1000);
+
+    manager.decide("run-1", "pause-1", true);
+
+    await expect(decision).resolves.toBe(true);
+    expect(manager.isRunApproved("run-1")).toBe(false);
+    expect(manager.decide("run-1", "pause-1", true)).toBe(false);
+  });
+
+  it("resolves pending pauses as denied when a run is cancelled", async () => {
+    const manager = new ApprovalManager();
+    const decision = manager.requestPause("run-1", "pause-1", 1000);
+
+    manager.cancelRun("run-1");
+
+    await expect(decision).resolves.toBe(false);
+  });
 });

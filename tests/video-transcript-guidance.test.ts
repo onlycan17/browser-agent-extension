@@ -31,6 +31,27 @@ describe("video transcript guidance prompt", () => {
     );
   });
 
+  it("starts playback once to enable inactive transcript controls", () => {
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain(
+      "Transcript controls often stay inactive until the video has started playing",
+    );
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain(
+      "start playback once with youtube_control (play), re-observe, and retry the transcript controls once",
+    );
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain("Never wait for the video to finish");
+  });
+
+  it("prefers direct caption reading over panel operations", () => {
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain("call it first for full-video requests");
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain("Udemy, Vimeo");
+  });
+
+  it("does not count an enabling playback start against the discovery budget", () => {
+    expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain(
+      "a playback start used to enable these controls does not count against this budget",
+    );
+  });
+
   it("uses observed controls and layout on every video site", () => {
     expect(AGENT_VIDEO_TRANSCRIPT_GUIDANCE).toContain(
       "always rely on the current observed controls and layout",

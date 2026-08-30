@@ -1,5 +1,6 @@
 import type { AssistantMessage, ChatRequest } from "../shared/llm";
 import type { ProviderSettings } from "../shared/settings";
+import { completeWithProviderRetry } from "./provider-retry";
 import { TRANSCRIPT_CHUNK_MAX_CHARS, type TranscriptChunkResult } from "../shared/transcript";
 
 export type TranscriptSummaryErrorCode = "TRANSCRIPT_UNAVAILABLE" | "TRANSCRIPT_SUMMARY_FAILED";
@@ -138,6 +139,8 @@ export class TranscriptSummaryService {
   constructor(
     private readonly reader: TranscriptChunkReader,
     private readonly completions: TranscriptCompletionService,
+    private readonly delay: (milliseconds: number) => Promise<void> = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
   ) {}
 
   async summarize(
@@ -280,11 +283,13 @@ export class TranscriptSummaryService {
     settings: ProviderSettings,
     chatRequest: ChatRequest,
   ): Promise<string> {
-    const completion = this.completions.complete(settings, chatRequest);
-    const response =
-      chatRequest.signal === undefined
-        ? await completion
-        : await waitForAbort(completion, chatRequest.signal);
+    const response = await completeWithProviderRetry(
+      () => this.completions.complete(settings, chatRequest),
+      {
+        ...(chatRequest.signal === undefined ? {} : { signal: chatRequest.signal }),
+        delay: this.delay,
+      },
+    );
     return responseText(response);
   }
 }

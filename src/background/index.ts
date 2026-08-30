@@ -3,17 +3,23 @@ import { openPanelForAction } from "./action-panel";
 import { AgentRunner } from "./agent-runner";
 import { AgentToolExecutor } from "./agent-tools";
 import { ApprovalManager } from "./approval-manager";
+import { createStorageMemoryRepository, StorageAgentMemoryService } from "./agent-memory-service";
 import { createMessageHandler } from "./message-handler";
 import { ProviderClientRouter } from "./provider-client";
 import { SafetyPolicy } from "./safety-policy";
 import { SettingsRepository } from "./settings-repository";
+import { createRuntimeSkillAdapter, SkillService } from "./skill-service";
 import { createChromeTabAdapter, TabService } from "./tab-service";
 import { TranscriptSummaryService } from "./transcript-summary-service";
 
 const PANEL_BEHAVIOR = { openPanelOnActionClick: false } as const;
 const settingsRepository = new SettingsRepository(chrome.storage.local, chrome.storage.session);
 const providerClient = new ProviderClientRouter();
-const tabService = new TabService(createChromeTabAdapter());
+const tabAdapter = createChromeTabAdapter();
+const tabService = new TabService(tabAdapter);
+tabAdapter.onTabCreated((tab) => {
+  tabService.noteTabCreated(tab);
+});
 const approvalManager = new ApprovalManager();
 const transcriptSummaryService = new TranscriptSummaryService(tabService, providerClient);
 const toolExecutor = new AgentToolExecutor(
@@ -22,6 +28,10 @@ const toolExecutor = new AgentToolExecutor(
   approvalManager,
   emitAgentEvent,
 );
+const memoryService = new StorageAgentMemoryService(
+  createStorageMemoryRepository(chrome.storage.local),
+);
+const skillService = new SkillService(createRuntimeSkillAdapter());
 const agentRunner = new AgentRunner(
   settingsRepository,
   tabService,
@@ -30,6 +40,10 @@ const agentRunner = new AgentRunner(
   approvalManager,
   emitAgentEvent,
   transcriptSummaryService,
+  memoryService,
+  undefined,
+  undefined,
+  skillService,
 );
 const handleMessage = createMessageHandler(
   settingsRepository,

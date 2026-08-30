@@ -147,6 +147,28 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "youtube_search",
+      description:
+        "Search YouTube videos directly without browsing, returning videoId, title, and channel per result. Works while the current page is on youtube.com.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", maxLength: 200, description: "The search query." },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description: "Maximum number of videos to return. Defaults to 5.",
+          },
+        },
+        required: ["query", "limit"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "youtube_control",
       description:
         "Use this tool for YouTube play, pause, seek, playback rate, and volume changes. For a combined request, make one call for each requested state change. Do not click visible player controls for operations supported by this tool.",
@@ -166,6 +188,119 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
 ];
 
+const CREATE_PLAN_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "create_plan",
+    description:
+      "Break a complex multi-step request into an explicit ordered plan of 2-10 short subtasks before acting. Skip this for requests a single action or a direct answer can complete.",
+    parameters: {
+      type: "object",
+      properties: {
+        steps: {
+          type: "array",
+          items: { type: "string", maxLength: 200 },
+          description:
+            "Ordered subtasks in short imperative form. Provide 2-10 steps, each 1-200 characters.",
+        },
+      },
+      required: ["steps"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const UPDATE_PLAN_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "update_plan",
+    description:
+      "Record progress on the active plan. Call this after finishing each subtask so the plan stays accurate.",
+    parameters: {
+      type: "object",
+      properties: {
+        completedSteps: {
+          type: "integer",
+          minimum: 0,
+          description: "Number of plan steps already finished.",
+        },
+        currentStep: {
+          type: "string",
+          maxLength: 200,
+          description: "The subtask being worked on now.",
+        },
+      },
+      required: ["completedSteps", "currentStep"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const SAVE_MEMORY_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "save_memory",
+    description:
+      "Record one short, reusable lesson or user preference about this website so future runs on the same site start smarter. Save at most one note per run, only when it is genuinely reusable, right before the final answer.",
+    parameters: {
+      type: "object",
+      properties: {
+        note: {
+          type: "string",
+          maxLength: 300,
+          description:
+            "One reusable lesson, 5-300 characters, such as a reliable path through this site or a user preference.",
+        },
+        kind: { type: "string", enum: ["success", "preference"] },
+      },
+      required: ["note", "kind"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const PAUSE_FOR_USER_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "pause_for_user",
+    description:
+      "Pause and ask the user to complete a step that must be done as themselves, such as signing in, approving an email, or solving a verification prompt. Describe exactly what the user should do. Never handle passwords, payment card data, or authentication codes yourself.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          maxLength: 300,
+          description: "What the user should do before the agent continues, 3-300 characters.",
+        },
+      },
+      required: ["reason"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const LOAD_SKILL_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "load_skill",
+    description:
+      "Load the full guidance of one bundled skill by its exact catalog name. Use it when the task matches a listed skill, before acting on that site.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          maxLength: 80,
+          description: "The exact skill name from the bundled skill catalog.",
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+};
+
 const CAPTURE_SCREEN_TOOL: ToolDefinition = {
   type: "function",
   function: {
@@ -177,7 +312,15 @@ const CAPTURE_SCREEN_TOOL: ToolDefinition = {
 };
 
 export function agentTools(allowScreenshots: boolean): ToolDefinition[] {
-  return allowScreenshots ? [...AGENT_TOOLS, CAPTURE_SCREEN_TOOL] : AGENT_TOOLS;
+  const tools = [
+    ...AGENT_TOOLS,
+    CREATE_PLAN_TOOL,
+    UPDATE_PLAN_TOOL,
+    SAVE_MEMORY_TOOL,
+    PAUSE_FOR_USER_TOOL,
+    LOAD_SKILL_TOOL,
+  ];
+  return allowScreenshots ? [...tools, CAPTURE_SCREEN_TOOL] : tools;
 }
 
 type ParsedTool =
@@ -199,7 +342,8 @@ type ParsedTool =
       name: "youtube_control";
       action: "seek" | "set_volume" | "set_rate";
       value: number;
-    };
+    }
+  | { name: "youtube_search"; query: string; limit: number };
 
 export interface ToolExecutionResult {
   message: ToolMessage;
@@ -297,6 +441,15 @@ function parseGuardedElementTool(
   return amount < 1 || amount > 2000 ? null : { name, generation, elementId, direction, amount };
 }
 
+function parseYouTubeSearchTool(value: Record<string, unknown>): ParsedTool | null {
+  if (!hasOnlyKeys(value, ["query", "limit"])) return null;
+  if (typeof value.query !== "string" || value.query.trim().length === 0) return null;
+  if (value.query.length > 200) return null;
+  if (!Number.isInteger(value.limit) || Number(value.limit) < 1 || Number(value.limit) > 10)
+    return null;
+  return { name: "youtube_search", query: value.query.trim(), limit: Number(value.limit) };
+}
+
 function parseYouTubeTool(value: Record<string, unknown>): ParsedTool | null {
   if (value.action === "play" || value.action === "pause") {
     return hasOnlyKeys(value, ["action"])
@@ -309,6 +462,40 @@ function parseYouTubeTool(value: Record<string, unknown>): ParsedTool | null {
   return typeof value.value === "number" && Number.isFinite(value.value)
     ? { name: "youtube_control", action, value: value.value }
     : null;
+}
+
+export interface PlanStep {
+  text: string;
+  status: "done" | "in_progress" | "pending";
+}
+
+export type PlanCall =
+  | { name: "create_plan"; steps: string[] }
+  | { name: "update_plan"; completedSteps: number; currentStep: string };
+
+export function parsePlanCall(call: ToolCall): PlanCall | null {
+  if (call.function.name !== "create_plan" && call.function.name !== "update_plan") return null;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    if (!isRecord(value)) return null;
+    if (call.function.name === "create_plan") {
+      if (!hasOnlyKeys(value, ["steps"])) return null;
+      const steps = value.steps;
+      if (!Array.isArray(steps) || steps.length < 1 || steps.length > 10) return null;
+      const normalized = steps.map((step) => (typeof step === "string" ? step.trim() : ""));
+      if (steps.some((step) => typeof step !== "string")) return null;
+      if (normalized.some((text) => text.length === 0 || text.length > 200)) return null;
+      return { name: "create_plan", steps: normalized };
+    }
+    if (!hasOnlyKeys(value, ["completedSteps", "currentStep"])) return null;
+    if (!Number.isInteger(value.completedSteps) || Number(value.completedSteps) < 0) return null;
+    if (typeof value.currentStep !== "string") return null;
+    const currentStep = value.currentStep.trim();
+    if (currentStep.length === 0 || currentStep.length > 200) return null;
+    return { name: "update_plan", completedSteps: Number(value.completedSteps), currentStep };
+  } catch {
+    return null;
+  }
 }
 
 export function isCaptureScreenCall(call: ToolCall): boolean {
@@ -357,6 +544,7 @@ function parseTool(call: ToolCall): ParsedTool | null {
     return key === undefined ? null : { name: "press_key", key };
   }
   if (call.function.name === "youtube_control") return parseYouTubeTool(value);
+  if (call.function.name === "youtube_search") return parseYouTubeSearchTool(value);
   if (call.function.name !== "scroll_page" || !hasOnlyKeys(value, ["direction", "amount"]))
     return null;
   const directions = ["up", "down", "left", "right"] as const;
@@ -374,6 +562,7 @@ function observedElement(tool: ParsedTool, snapshot: PageSnapshot): ObservedElem
 function actionProposal(tool: ParsedTool, snapshot: PageSnapshot): ActionProposal | null {
   if (tool.name === "scroll_page") return { action: "scroll" };
   if (tool.name === "youtube_control") return { action: "youtube_control" };
+  if (tool.name === "youtube_search") return { action: "youtube_search" };
   if (tool.name === "press_key") return { action: "press_key", key: tool.key };
   const element = observedElement(tool, snapshot);
   if (element === null) return null;
@@ -439,6 +628,9 @@ function pageAction(tool: ParsedTool, element: ObservedElement | null): PageActi
     };
   }
   if (tool.name === "press_key") return { type: "PAGE_PRESS_KEY", payload: { key: tool.key } };
+  if (tool.name === "youtube_search") {
+    return { type: "YOUTUBE_SEARCH", payload: { query: tool.query, limit: tool.limit } };
+  }
   if (tool.name === "youtube_control") {
     return "value" in tool
       ? { type: "YOUTUBE_CONTROL", payload: { action: tool.action, value: tool.value } }
@@ -459,6 +651,9 @@ function signature(tool: ParsedTool): string {
   if (tool.name === "scroll_element")
     return `${tool.name}:${String(tool.generation)}:${tool.elementId}:${tool.direction}:${String(tool.amount)}`;
   if (tool.name === "press_key") return `${tool.name}:${tool.key}`;
+  if (tool.name === "youtube_search") {
+    return `${tool.name}:${textFingerprint(tool.query)}:${String(tool.limit)}`;
+  }
   if (tool.name === "youtube_control") {
     return "value" in tool
       ? `${tool.name}:${tool.action}:${String(tool.value)}`
@@ -467,7 +662,74 @@ function signature(tool: ParsedTool): string {
   return `${tool.name}:${tool.direction}:${String(tool.amount)}`;
 }
 
+export interface SaveMemoryCall {
+  note: string;
+  kind: "success" | "preference";
+}
+
+export function parseSaveMemoryCall(call: ToolCall): SaveMemoryCall | null {
+  if (call.function.name !== "save_memory") return null;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    if (!isRecord(value) || !hasOnlyKeys(value, ["note", "kind"])) return null;
+    if (typeof value.note !== "string" || typeof value.kind !== "string") return null;
+    const note = value.note.trim();
+    if (note.length < 5 || note.length > 300) return null;
+    if (value.kind !== "success" && value.kind !== "preference") return null;
+    return { note, kind: value.kind };
+  } catch {
+    return null;
+  }
+}
+
+export function parseSkillLoadCall(call: ToolCall): { name: string } | null {
+  if (call.function.name !== "load_skill") return null;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    if (!isRecord(value) || !hasOnlyKeys(value, ["name"])) return null;
+    if (typeof value.name !== "string") return null;
+    const name = value.name.trim();
+    if (name.length === 0 || name.length > 80) return null;
+    return { name };
+  } catch {
+    return null;
+  }
+}
+
+export function parsePauseForUserCall(call: ToolCall): { reason: string } | null {
+  if (call.function.name !== "pause_for_user") return null;
+  try {
+    const value = JSON.parse(call.function.arguments) as unknown;
+    if (!isRecord(value) || !hasOnlyKeys(value, ["reason"])) return null;
+    if (typeof value.reason !== "string") return null;
+    const reason = value.reason.trim();
+    if (reason.length < 3 || reason.length > 300) return null;
+    return { reason };
+  } catch {
+    return null;
+  }
+}
+
+function planCallSignature(plan: PlanCall): string {
+  if (plan.name === "create_plan") {
+    return `create_plan:${textFingerprint(plan.steps.join("|"))}`;
+  }
+  return `update_plan:${String(plan.completedSteps)}:${textFingerprint(plan.currentStep)}`;
+}
+
+export function parseToolCallArguments(call: ToolCall): ParsedTool | null {
+  return parseTool(call);
+}
+
 export function toolCallSignature(call: ToolCall): string {
+  const skill = parseSkillLoadCall(call);
+  if (skill !== null) return `load_skill:${skill.name}`;
+  const pause = parsePauseForUserCall(call);
+  if (pause !== null) return `pause_for_user:${textFingerprint(pause.reason)}`;
+  const memory = parseSaveMemoryCall(call);
+  if (memory !== null) return `save_memory:${textFingerprint(memory.note)}`;
+  const plan = parsePlanCall(call);
+  if (plan !== null) return planCallSignature(plan);
   if (isCaptureScreenCall(call)) return "capture_screen";
   const transcript = parseTranscriptSummaryCall(call);
   if (transcript !== null) return `summarize_video_transcript:${textFingerprint(transcript.focus)}`;
@@ -484,6 +746,14 @@ function textFingerprint(value: string): string {
 }
 
 export function toolCallProgressSignature(call: ToolCall): string {
+  const skill = parseSkillLoadCall(call);
+  if (skill !== null) return `load_skill:${skill.name}`;
+  const pause = parsePauseForUserCall(call);
+  if (pause !== null) return `pause_for_user:${textFingerprint(pause.reason)}`;
+  const memory = parseSaveMemoryCall(call);
+  if (memory !== null) return `save_memory:${textFingerprint(memory.note)}`;
+  const plan = parsePlanCall(call);
+  if (plan !== null) return planCallSignature(plan);
   if (isCaptureScreenCall(call)) return "capture_screen";
   const transcript = parseTranscriptSummaryCall(call);
   if (transcript !== null) return `summarize_video_transcript:${textFingerprint(transcript.focus)}`;
@@ -558,6 +828,7 @@ export class AgentToolExecutor {
           ok: true,
           message: result.message,
           ...(result.pageSettled === undefined ? {} : { pageSettled: result.pageSettled }),
+          ...(result.data === undefined ? {} : { data: result.data }),
         }),
         failed: false,
         signature: signature(tool),

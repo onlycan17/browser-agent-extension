@@ -5,7 +5,11 @@ import { ElementRegistry } from "./element-registry";
 import { elementIsUnobscured, elementMatchesObservation } from "./page-observer";
 
 export type ActionExecutionCode =
-  "STALE_ELEMENT" | "ELEMENT_NOT_FOUND" | "ELEMENT_OCCLUDED" | "UNSAFE_ACTION";
+  | "STALE_ELEMENT"
+  | "ELEMENT_NOT_FOUND"
+  | "ELEMENT_OCCLUDED"
+  | "UNSAFE_ACTION"
+  | "YOUTUBE_SEARCH_FAILED";
 
 export class ActionExecutionError extends Error {
   constructor(
@@ -24,10 +28,34 @@ function isDisabled(element: HTMLElement): boolean {
   return element.disabled === true;
 }
 
+function elementWindow(element: HTMLElement): Window {
+  return element.ownerDocument.defaultView ?? window;
+}
+
 function isHidden(element: HTMLElement): boolean {
-  const style = window.getComputedStyle(element);
+  const style = elementWindow(element).getComputedStyle(element);
   const hidden = element.hidden === true || element.hidden === "until-found";
   return hidden || style.display === "none" || style.visibility === "hidden";
+}
+
+function composedActiveElement(doc: Document): Element | null {
+  let active: Element | null = doc.activeElement;
+  for (;;) {
+    if (!(active instanceof HTMLElement)) return active;
+    const shadow = active.shadowRoot;
+    if (shadow !== null && shadow.activeElement !== null) {
+      active = shadow.activeElement;
+      continue;
+    }
+    if (active instanceof HTMLIFrameElement) {
+      const frameDoc = active.contentDocument;
+      if (frameDoc !== null && frameDoc.activeElement !== null) {
+        active = frameDoc.activeElement;
+        continue;
+      }
+    }
+    return active;
+  }
 }
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -94,7 +122,7 @@ export class PageActionExecutor {
       throw new ActionExecutionError("UNSAFE_ACTION", "This input type cannot be edited.");
     }
     element.focus();
-    if (document.activeElement !== element)
+    if (composedActiveElement(element.ownerDocument) !== element)
       throw new ActionExecutionError("UNSAFE_ACTION", "This field could not be focused safely.");
     if (element instanceof HTMLInputElement) return this.typeIntoInput(element, text, replace);
     if (element instanceof HTMLTextAreaElement)
@@ -108,8 +136,8 @@ export class PageActionExecutor {
   }
 
   pressKey(key: AllowedKey): PageActionResult {
-    const target =
-      document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+    const composed = composedActiveElement(document);
+    const target = composed instanceof HTMLElement ? composed : document.body;
     if (key === "Enter" && (target === document.body || target === document.documentElement)) {
       throw new ActionExecutionError("UNSAFE_ACTION", "No actionable element is focused.");
     }

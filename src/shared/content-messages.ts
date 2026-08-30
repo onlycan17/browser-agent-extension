@@ -108,6 +108,18 @@ function parseYouTubeControl(payload: unknown): PageActionRequest | null {
     : null;
 }
 
+function parseYouTubeSearch(payload: unknown): PageActionRequest | null {
+  if (!isRecord(payload) || !hasOnlyKeys(payload, ["query", "limit"])) return null;
+  if (typeof payload.query !== "string" || payload.query.trim().length === 0) return null;
+  if (payload.query.length > 200) return null;
+  if (!Number.isInteger(payload.limit) || Number(payload.limit) < 1 || Number(payload.limit) > 10)
+    return null;
+  return {
+    type: "YOUTUBE_SEARCH",
+    payload: { query: payload.query.trim(), limit: Number(payload.limit) },
+  };
+}
+
 function parseGuardedElementAction(
   type: "PAGE_SELECT_OPTION" | "PAGE_SET_CHECKED" | "PAGE_SCROLL_ELEMENT",
   payload: unknown,
@@ -163,6 +175,7 @@ function parseAction(type: unknown, payload: unknown): PageActionRequest | null 
     return key === undefined ? null : { type, payload: { key } };
   }
   if (type === "YOUTUBE_CONTROL") return parseYouTubeControl(payload);
+  if (type === "YOUTUBE_SEARCH") return parseYouTubeSearch(payload);
   if (
     type === "PAGE_SELECT_OPTION" ||
     type === "PAGE_SET_CHECKED" ||

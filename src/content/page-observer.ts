@@ -13,6 +13,7 @@ const INTERACTIVE_SELECTOR = [
   "[role='link']",
   "[role='checkbox']",
   "[role='radio']",
+  "[role='tab']",
   "[role='textbox']",
 ].join(",");
 const MAX_ELEMENTS = 150;
@@ -21,18 +22,49 @@ const MAX_FIELD_TEXT = 300;
 const MAX_TEXT_NODES = 5_000;
 const MAX_TEXT_RANGE_CHECKS = 20_000;
 const MAX_SELECT_OPTIONS = 50;
+const MAX_ELEMENT_SCAN = 30_000;
+const MAX_FRAMES = 5;
+const MAX_SHADOW_ROOTS = 50;
+
+interface FrameContext {
+  doc: Document;
+  win: Window;
+}
+
+function elementContext(element: HTMLElement): FrameContext {
+  const doc = element.ownerDocument;
+  const win = doc.defaultView ?? window;
+  return { doc, win };
+}
 
 function compactText(value: string | null | undefined, limit = MAX_FIELD_TEXT): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
-function isRendered(element: HTMLElement): boolean {
+function composedParent(element: HTMLElement): HTMLElement | null {
+  const parent = element.parentElement;
+  if (parent !== null) return parent;
+  const root = element.getRootNode();
+  return root instanceof ShadowRoot ? (root.host as HTMLElement) : null;
+}
+
+function composedContains(ancestor: HTMLElement, node: Element | null): boolean {
+  let current: Element | null = node;
+  while (current !== null) {
+    if (current === ancestor) return true;
+    const root = current.getRootNode();
+    current = root instanceof ShadowRoot ? root.host : null;
+  }
+  return false;
+}
+
+function isRendered(element: HTMLElement, ctx: FrameContext): boolean {
   for (
     let current: HTMLElement | null = element;
     current !== null;
-    current = current.parentElement
+    current = composedParent(current)
   ) {
-    const style = window.getComputedStyle(current);
+    const style = ctx.win.getComputedStyle(current);
     if (
       current.hidden === true ||
       style.display === "none" ||
@@ -46,31 +78,30 @@ function isRendered(element: HTMLElement): boolean {
 }
 
 function isInViewport(
+  win: Window,
   rect: Pick<DOMRect, "top" | "right" | "bottom" | "left" | "width" | "height">,
 ): boolean {
   if (rect.width <= 0 || rect.height <= 0) return false;
   return (
-    rect.bottom > 0 &&
-    rect.right > 0 &&
-    rect.top < window.innerHeight &&
-    rect.left < window.innerWidth
+    rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth
   );
 }
 
 function isVisible(element: HTMLElement): boolean {
-  if (!isRendered(element) || window.getComputedStyle(element).pointerEvents === "none")
+  const ctx = elementContext(element);
+  if (!isRendered(element, ctx) || ctx.win.getComputedStyle(element).pointerEvents === "none")
     return false;
-  const rect = element.getBoundingClientRect();
-  return isInViewport(rect);
+  return isInViewport(ctx.win, element.getBoundingClientRect());
 }
 
 export function elementIsUnobscured(element: HTMLElement): boolean {
-  if (typeof document.elementFromPoint !== "function") return true;
+  const ctx = elementContext(element);
+  if (typeof ctx.doc.elementFromPoint !== "function") return true;
   const rect = element.getBoundingClientRect();
-  const x = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(window.innerWidth - 1, 0));
-  const y = Math.min(Math.max(rect.top + rect.height / 2, 0), Math.max(window.innerHeight - 1, 0));
-  const hit = document.elementFromPoint(x, y);
-  return hit === null || hit === element || element.contains(hit);
+  const x = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(ctx.win.innerWidth - 1, 0));
+  const y = Math.min(Math.max(rect.top + rect.height / 2, 0), Math.max(ctx.win.innerHeight - 1, 0));
+  const hit = ctx.doc.elementFromPoint(x, y);
+  return hit === null || hit === element || composedContains(element, hit);
 }
 
 function isInteractable(element: HTMLElement): boolean {
@@ -94,7 +125,14 @@ function labelText(element: HTMLElement): string {
 
 function labelledByText(element: HTMLElement): string {
   const ids = element.getAttribute("aria-labelledby")?.split(/\s+/) ?? [];
-  return compactText(ids.map((id) => document.getElementById(id)?.textContent).join(" "));
+  if (ids.length === 0) return "";
+  const root = element.getRootNode();
+  const labels = ids.map((id) =>
+    root instanceof ShadowRoot
+      ? root.getElementById(id)?.textContent
+      : document.getElementById(id)?.textContent,
+  );
+  return compactText(labels.join(" "));
 }
 
 function isExplicitlyEditable(element: HTMLElement): boolean {
@@ -161,8 +199,14 @@ function observedOptions(element: HTMLElement): ObservedOption[] | undefined {
     }));
 }
 
-function scrollability(element: HTMLElement): { scrollableX: boolean; scrollableY: boolean } {
-  const style = window.getComputedStyle(element);
+function scrollability(
+  element: HTMLElement,
+  ctx: FrameContext,
+): {
+  scrollableX: boolean;
+  scrollableY: boolean;
+} {
+  const style = ctx.win.getComputedStyle(element);
   const scrollableX =
     /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
   const scrollableY =
@@ -176,6 +220,7 @@ function observedChecked(element: HTMLElement): boolean | undefined {
 }
 
 function describeElement(element: HTMLElement, id: string): ObservedElement {
+  const ctx = elementContext(element);
   const inputType =
     element instanceof HTMLInputElement || element instanceof HTMLButtonElement
       ? element.type
@@ -185,7 +230,7 @@ function describeElement(element: HTMLElement, id: string): ObservedElement {
   const download = element instanceof HTMLAnchorElement && element.hasAttribute("download");
   const checked = observedChecked(element);
   const options = observedOptions(element);
-  const { scrollableX, scrollableY } = scrollability(element);
+  const { scrollableX, scrollableY } = scrollability(element, ctx);
   const base = {
     id,
     tag: element.tagName.toLowerCase(),
@@ -272,8 +317,12 @@ export function elementMatchesObservation(
 function scrollableAncestors(elements: readonly HTMLElement[]): HTMLElement[] {
   const found = new Set<HTMLElement>();
   for (const element of elements) {
-    for (let current = element.parentElement; current !== null; current = current.parentElement) {
-      const { scrollableX, scrollableY } = scrollability(current);
+    for (
+      let current = composedParent(element);
+      current !== null;
+      current = composedParent(current)
+    ) {
+      const { scrollableX, scrollableY } = scrollability(current, elementContext(current));
       if ((scrollableX || scrollableY) && isInteractable(current)) found.add(current);
     }
   }
@@ -284,7 +333,7 @@ function isEditableText(element: HTMLElement): boolean {
   for (
     let current: HTMLElement | null = element;
     current !== null;
-    current = current.parentElement
+    current = composedParent(current)
   ) {
     if (
       current instanceof HTMLInputElement ||
@@ -299,14 +348,15 @@ function isEditableText(element: HTMLElement): boolean {
 }
 
 function visibleTextParts(
+  ctx: FrameContext,
   node: Text,
   parent: HTMLElement,
   remainingRangeChecks: number,
 ): { parts: string[]; rangeChecks: number } {
-  const range = document.createRange();
+  const range = ctx.doc.createRange();
   range.selectNodeContents(node);
   if (typeof range.getBoundingClientRect !== "function") {
-    return isInViewport(parent.getBoundingClientRect())
+    return isInViewport(ctx.win, parent.getBoundingClientRect())
       ? { parts: [node.data], rangeChecks: 0 }
       : { parts: [], rangeChecks: 0 };
   }
@@ -317,14 +367,13 @@ function visibleTextParts(
     range.setStart(node, match.index);
     range.setEnd(node, match.index + match[0].length);
     rangeChecks += 1;
-    if (isInViewport(range.getBoundingClientRect())) parts.push(match[0]);
+    if (isInViewport(ctx.win, range.getBoundingClientRect())) parts.push(match[0]);
   }
   return { parts, rangeChecks };
 }
 
-function pageText(): string {
-  const body = document.body;
-  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+function rootText(ctx: FrameContext, root: ParentNode): string {
+  const walker = ctx.doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const text: string[] = [];
   let textLength = 0;
   let visitedTextNodes = 0;
@@ -336,14 +385,56 @@ function pageText(): string {
     const parent = node.parentElement;
     if (parent === null || ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(parent.tagName))
       continue;
-    if (isEditableText(parent) || !isRendered(parent)) continue;
-    const visible = visibleTextParts(node, parent, MAX_TEXT_RANGE_CHECKS - rangeChecks);
+    if (isEditableText(parent) || !isRendered(parent, ctx)) continue;
+    const visible = visibleTextParts(ctx, node, parent, MAX_TEXT_RANGE_CHECKS - rangeChecks);
     rangeChecks += visible.rangeChecks;
     text.push(...visible.parts);
     textLength += visible.parts.reduce((length, part) => length + part.length, 0);
     if (textLength >= MAX_VISIBLE_TEXT) break;
   }
   return compactText(text.join(" "), MAX_VISIBLE_TEXT);
+}
+
+function openShadowRoots(ctx: FrameContext): ShadowRoot[] {
+  const roots: ShadowRoot[] = [];
+  let scanned = 0;
+  for (const element of ctx.doc.querySelectorAll<HTMLElement>("*")) {
+    scanned += 1;
+    if (scanned > MAX_ELEMENT_SCAN) break;
+    if (roots.length >= MAX_SHADOW_ROOTS) break;
+    if (element.shadowRoot !== null) roots.push(element.shadowRoot);
+  }
+  return roots;
+}
+
+function sameOriginFrameContexts(ctx: FrameContext): FrameContext[] {
+  const frames: FrameContext[] = [];
+  for (const iframe of Array.from(ctx.doc.querySelectorAll("iframe"))) {
+    if (frames.length >= MAX_FRAMES) break;
+    const frameDoc = iframe.contentDocument;
+    if (frameDoc === null) continue;
+    const frameWin = frameDoc.defaultView;
+    if (frameWin === null) continue;
+    if (!isInteractable(iframe)) continue;
+    frames.push({ doc: frameDoc, win: frameWin });
+  }
+  return frames;
+}
+
+function interactiveCandidates(ctx: FrameContext): HTMLElement[] {
+  const elements = Array.from(ctx.doc.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR));
+  for (const root of openShadowRoots(ctx)) {
+    elements.push(...root.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR));
+  }
+  return elements;
+}
+
+function pageText(ctx: FrameContext): string {
+  const parts = [rootText(ctx, ctx.doc.body)];
+  for (const root of openShadowRoots(ctx)) {
+    parts.push(rootText(ctx, root));
+  }
+  return compactText(parts.join(" "), MAX_VISIBLE_TEXT);
 }
 
 export class PageObserver {
@@ -354,12 +445,22 @@ export class PageObserver {
 
   observe(): PageSnapshot {
     const generation = this.registry.beginObservation();
-    const interactive = Array.from(document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR));
-    const candidates = [...interactive, ...scrollableAncestors(interactive)];
-    const elements = [...new Set(candidates)]
-      .filter(isInteractable)
-      .slice(0, MAX_ELEMENTS)
-      .map((element) => observeElement(element, this.registry));
+    const topCtx: FrameContext = { doc: document, win: window };
+    const frames = [topCtx, ...sameOriginFrameContexts(topCtx)];
+    const elements: ObservedElement[] = [];
+    const seen = new Set<HTMLElement>();
+    for (const ctx of frames) {
+      if (elements.length >= MAX_ELEMENTS) break;
+      const interactive = interactiveCandidates(ctx);
+      const candidates = [...interactive, ...scrollableAncestors(interactive)];
+      for (const element of [...new Set(candidates)]) {
+        if (elements.length >= MAX_ELEMENTS) break;
+        if (seen.has(element)) continue;
+        if (!isInteractable(element)) continue;
+        seen.add(element);
+        elements.push(observeElement(element, this.registry));
+      }
+    }
     const youtube = this.youtube.getState();
     return {
       generation,
@@ -371,7 +472,7 @@ export class PageObserver {
         scrollX: window.scrollX,
         scrollY: window.scrollY,
       },
-      visibleText: pageText(),
+      visibleText: pageText(topCtx),
       elements,
       ...(youtube === undefined ? {} : { youtube }),
     };

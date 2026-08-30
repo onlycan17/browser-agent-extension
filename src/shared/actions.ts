@@ -65,9 +65,11 @@ export type PageActionRequest =
       payload:
         | { action: "play" | "pause" }
         | { action: "seek" | "set_volume" | "set_rate"; value: number };
-    };
+    }
+  | { type: "YOUTUBE_SEARCH"; payload: { query: string; limit: number } };
 
 export interface PageActionResult {
   message: string;
   pageSettled?: boolean;
+  data?: unknown;
 }

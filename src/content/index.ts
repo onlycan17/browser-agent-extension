@@ -6,7 +6,9 @@ import { ElementRegistry } from "./element-registry";
 import { ActionExecutionError, PageActionExecutor } from "./page-action-executor";
 import { PageObserver } from "./page-observer";
 import { waitForPageSettled } from "./page-settler";
-import { readStableTranscriptChunk } from "./transcript-reader";
+import { readStableTranscriptChunk, readTranscriptChunk } from "./transcript-reader";
+import { handleYouTubeSearch, readHttpTranscriptChunk } from "./youtube-http";
+import { readVttTranscriptChunk } from "./vtt-transcript";
 import { YouTubeAdapter, YouTubeError } from "./youtube-adapter";
 
 const registry = new ElementRegistry();
@@ -21,6 +23,16 @@ function errorResponse(id: string, code: string, message: string): ContentRespon
 }
 
 async function executeAction(request: PageActionRequest): Promise<PageActionResult> {
+  if (request.type === "YOUTUBE_SEARCH") {
+    try {
+      return await handleYouTubeSearch(request.payload);
+    } catch (error: unknown) {
+      throw new ActionExecutionError(
+        "YOUTUBE_SEARCH_FAILED",
+        error instanceof Error ? error.message : "The YouTube search request failed.",
+      );
+    }
+  }
   if (request.type === "PAGE_CLICK") {
     return actions.click(
       request.payload.generation,
@@ -86,17 +98,39 @@ async function handleMessage(message: unknown): Promise<ContentResponse<ContentD
   if (request.type === "PAGE_OBSERVE")
     return { id: request.id, ok: true, data: observer.observe() };
   if (request.type === "TRANSCRIPT_READ_CHUNK") {
-    return {
-      id: request.id,
-      ok: true,
-      data: await readStableTranscriptChunk(
+    const domChunk = readTranscriptChunk(
+      document,
+      request.payload.cursor,
+      request.payload.maxChars,
+      request.payload.afterSegmentKey,
+    );
+    if (domChunk.available) {
+      const stable = await readStableTranscriptChunk(
         document,
         request.payload.cursor,
         request.payload.maxChars,
         request.payload.afterSegmentKey,
         () => waitForPageSettled(document),
-      ),
-    };
+      );
+      return { id: request.id, ok: true, data: stable };
+    }
+    const httpChunk = await readHttpTranscriptChunk(
+      location,
+      request.payload.cursor,
+      request.payload.maxChars,
+      request.payload.afterSegmentKey,
+    );
+    if (httpChunk.available) {
+      return { id: request.id, ok: true, data: httpChunk };
+    }
+    const vttChunk = await readVttTranscriptChunk(
+      document,
+      location,
+      request.payload.cursor,
+      request.payload.maxChars,
+      request.payload.afterSegmentKey,
+    );
+    return { id: request.id, ok: true, data: vttChunk };
   }
   try {
     const result = await executeAction(request);
@@ -108,7 +142,8 @@ async function handleMessage(message: unknown): Promise<ContentResponse<ContentD
       const retryable =
         error.code === "STALE_ELEMENT" ||
         error.code === "ELEMENT_NOT_FOUND" ||
-        error.code === "ELEMENT_OCCLUDED";
+        error.code === "ELEMENT_OCCLUDED" ||
+        error.code === "YOUTUBE_SEARCH_FAILED";
       return {
         id: request.id,
         ok: false,

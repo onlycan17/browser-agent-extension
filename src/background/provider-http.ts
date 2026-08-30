@@ -17,13 +17,32 @@ export interface ProviderRequestOptions {
   timeoutMs: number;
 }
 
-function mapHttpError(status: number): ProviderError {
+const MAX_ERROR_DETAIL_LENGTH = 300;
+
+function compactDetail(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_DETAIL_LENGTH);
+}
+
+async function responseDetail(response: Response): Promise<string> {
+  try {
+    return compactDetail(await response.text());
+  } catch {
+    return "";
+  }
+}
+
+function mapHttpError(status: number, detail: string): ProviderError {
   const retryable = status === 408 || status === 429 || status >= 500;
-  const message =
-    status === 401 || status === 403
-      ? "The provider rejected the API key."
-      : "The provider rejected the request.";
-  return new ProviderError("PROVIDER_REJECTED", message, retryable);
+  if (status === 401 || status === 403) {
+    return new ProviderError("PROVIDER_REJECTED", "The provider rejected the API key.", retryable);
+  }
+  return new ProviderError(
+    "PROVIDER_REJECTED",
+    detail.length > 0
+      ? `The provider rejected the request. (${String(status)}: ${detail})`
+      : `The provider rejected the request. (${String(status)})`,
+    retryable,
+  );
 }
 
 function timeoutError(): ProviderError {
@@ -59,7 +78,10 @@ export class ProviderHttpClient {
     try {
       controller.signal.throwIfAborted();
       const response = await this.fetchImpl(url, { ...init, signal: controller.signal });
-      if (!response.ok) throw mapHttpError(response.status);
+      if (!response.ok) {
+        const detail = await responseDetail(response);
+        throw mapHttpError(response.status, detail);
+      }
       try {
         return await response.json();
       } catch (error: unknown) {

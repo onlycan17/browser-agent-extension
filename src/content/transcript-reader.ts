@@ -5,7 +5,7 @@ import {
   type TranscriptChunkResult,
 } from "../shared/transcript";
 
-interface TranscriptSegment {
+export interface TranscriptSegment {
   timestamp: string;
   text: string;
   key: string;
@@ -115,16 +115,12 @@ function anchoredCursor(
   return anchor < 0 ? null : anchor + 1;
 }
 
-export function readTranscriptChunk(
-  document: Document,
+export function chunkTranscriptSegments(
+  segments: readonly TranscriptSegment[],
   cursor: number,
   maxChars: number,
-  afterSegmentKey = "",
+  afterSegmentKey: string,
 ): TranscriptChunkResult {
-  const segments = transcriptSegments(document);
-  if (segments.length === 0) {
-    return { available: false, reason: "No opened transcript segments were found." };
-  }
   const startCursor = anchoredCursor(segments, cursor, afterSegmentKey);
   if (
     startCursor === null ||
@@ -169,6 +165,19 @@ export function readTranscriptChunk(
     totalSegments: segments.length,
     lastSegmentKey: last.key,
   };
+}
+
+export function readTranscriptChunk(
+  document: Document,
+  cursor: number,
+  maxChars: number,
+  afterSegmentKey = "",
+): TranscriptChunkResult {
+  const segments = transcriptSegments(document);
+  if (segments.length === 0) {
+    return { available: false, reason: "No opened transcript segments were found." };
+  }
+  return chunkTranscriptSegments(segments, cursor, maxChars, afterSegmentKey);
 }
 
 export async function readStableTranscriptChunk(
